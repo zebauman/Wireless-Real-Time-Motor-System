@@ -39,13 +39,15 @@ class BLEManager(private val context: Context) {
     // FUNCTION TO CALL WHEN A DEVICE IS FOUND
     private var onDeviceFound: ((BleTimeDevice) -> Unit)? = null
 
+    // FUNCTION TO CALL WHEN A DEVICE IS TO BE REMOVED DEPRECIATED
+    private var onDeviceRemoved: ((BleTimeDevice) -> Unit)? = null
+
     // COROUTINE SCOPE TO MANAGE BACKGROUND JOB's LIFECYCLE
     //COROUTINE is A FUNCTION THAT CAN PAUSE AND RESUME ITS EXECUTION WITHOUT BLOCKING THE THREAD
     private val coroutineScope = CoroutineScope(Dispatchers.Main + Job())
     private var cleanupJob: Job? = null
 
     // CALLBACK FUNCTIONS
-
     // CALLBACK FUNCTION FOR GATT
     private val gattCallback = object : BluetoothGattCallback() {
         // FUNCTION WHEN THE CONNECTION STATE CHANGES OF THE CONNECTED DEVICE -> MANAGED BY GATT
@@ -138,32 +140,39 @@ class BLEManager(private val context: Context) {
         bluetoothGatt = device.connectGatt(context, false, gattCallback)
     }
 
-    // LISTENER FUNCTIONS
+    // SETTERS FOR THE LISTENER FUNCTIONS
     fun setDeviceFoundListener(listener: (BleTimeDevice) -> Unit){
         onDeviceFound = listener
     }
-
     fun setConnectionStateListener(listener: (BluetoothDevice, Boolean) -> Unit) {
         onConnectionStateChange = listener
+    }
+    fun setDeviceRemovedListener(listener: (BleTimeDevice) -> Unit){
+        onDeviceRemoved = listener
     }
 
     private fun startCleanupJob() : Job{
         return coroutineScope.launch {
+            while (true) {
+                delay(5000)
+                val now = Instant.now()
+                val timeout = Duration.ofSeconds(10).toMillis()
 
-            delay(5000)
-            val now = Instant.now()
-            val timeout = Duration.ofSeconds(10)
+                val toRemove = mutableListOf<Int>()
+                scannedDevices.forEachIndexed { index, device ->
+                    val age = Duration.between(device.time, now).toMillis()
+                    if (age > timeout) {
+                        toRemove.add(index)
+                    }
+                }
+                toRemove.reversed().forEach {
+                    Log.i("BLE", "Device ${scannedDevices[it].bDevice.address} timed out")
 
-            val iterator = scannedDevices.iterator()
-            while(iterator.hasNext()){
-                val device = iterator.next()
-                val age = Duration.between(device.time, now)
-                if(age > timeout){
-                    iterator.remove()
+                    onDeviceRemoved?.invoke(scannedDevices[it])
+                    scannedDevices.removeAt(it)
                 }
             }
+
         }
     }
-
-
 }

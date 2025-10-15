@@ -2,6 +2,7 @@ package com.remotemotorcontroller.adapter
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -76,18 +77,16 @@ class DeviceAdapter(
     }
 
     // REMOVE DEVICES THAT ARE NO LONGER CONNECTABLE -> TIMEOUT DEVICES
-    fun removeStaleDevices(timeoutMs: Long){
-        val now = Instant.now()
-        val iterator = devices.iterator()
-        var index = 0
-        while(iterator.hasNext()){
-            val device = iterator.next()
-            val age = Duration.between(device.time, now).toMillis()
-            if(age > timeoutMs){
-                iterator.remove()
-                notifyItemRemoved(devices.size - 1)
-            }
-            ++index
+    fun removeDevice(removeDevice: BleTimeDevice){
+        val existingIndex = devices.indexOfFirst{it.bDevice.address == removeDevice.bDevice.address}
+
+        if(existingIndex != -1){
+            devices.removeAt(existingIndex)
+            notifyItemRemoved(existingIndex)
         }
+        else{
+            Log.e("BLE","Device not found in list: ${removeDevice.bDevice.address}")
+        }
+
     }
 }

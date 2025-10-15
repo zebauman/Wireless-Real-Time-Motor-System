@@ -58,6 +58,11 @@ class MainActivity : AppCompatActivity() {
                 deviceAdapter.addOrUpdateDevice(device)
             }
         }
+        bleManager.setDeviceRemovedListener { device ->
+            runOnUiThread {
+                deviceAdapter.removeDevice(device)
+            }
+        }
 
         bleManager.setConnectionStateListener { device, connected ->
             runOnUiThread {
@@ -111,7 +116,6 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun connectToDevice(device: BluetoothDevice){
-        Log.i("MainActivity", "Connecting to ${device.name ?: "Unknown"} - ${device.address}")
         bleManager.connect(device)
     }
 
