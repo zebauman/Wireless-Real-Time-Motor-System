@@ -124,23 +124,25 @@ BT_GATT_SERVICE_DEFINE(motor_svc, BT_GATT_PRIMARY_SERVICE(&motor_srv_uuid),
 		    BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
 	);
 
+// [STATUS (1 BYTE)] [SPEED (4 BYTES)] [POSITION (4 BYTES)] = 9 BYTES TOTAL
+static inline void pack_telemetry(uint8_t out[9]){
+	out[0] = motor_ctx.motor_status;
+	sys_put_le32(motor_ctx.current_speed, &out[1]);
+	sys_put_le32(motor_ctx.current_position, &out[5]);
+}
 
-// HELPER TO SEND TELEMETRY NOTIFICATIONS TO PHONE
+// HELPER TO SEND TELEMETRY NOTIFICATIONS TO PHONE => BROADCAST TO ALL CONNECTED DEVICES
 void motor_notify_telemetry(void)
 {
 	if (!motor_ctx.notification_enabled) {
 		return;
 	}
 
-	// TELEMETRY DATA FORMAT - LITTLE-ENDIAN
-	// [motor_status (1 byte - 4 bits)] [current_speed (4 bytes - 32 bits)] [current_position (4 bytes - 32 bits)]
 	uint8_t telemetry_data[9];
-	telemetry_data[0] = motor_ctx.motor_status; // FIRST BYTE IS MOTOR STATUS [0]
-	sys_put_le32(motor_ctx.current_speed, &telemetry_data[1]); // NEXT 4 BYTES ARE CURRENT SPEED [1-4] - 32 BITS INT
-	sys_put_le32(motor_ctx.current_position, &telemetry_data[5]); // LAST 4 BYTES ARE CURRENT POSITION [5-8] - 32 BITS INT
+	pack_telemetry(telemetry_data);
 
 	// SEND NOTIFICATION
-	int err = bt_gatt_notify(NULL, &motor_svc.attrs[2],
+	int err = bt_gatt_notify(NULL, &motor_svc.attrs[4],
 				 telemetry_data, sizeof(telemetry_data));
 	if (err) {
 		LOG_ERR("Failed to send notification (err %d)", err);

@@ -6,7 +6,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
-#include "bluetooth/bluetooth.h"
+#include "bluetooth.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -55,7 +55,7 @@ int main(void)
         motor_ctx.motor_status = 0x01;
 
         motor_notify_telemetry();
-        k_sleep(K_MSEC(1000));
+        k_sleep(K_MSEC(3000));
     }
 
     return 0;
