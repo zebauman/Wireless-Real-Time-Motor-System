@@ -78,7 +78,6 @@ class ScanActivity : AppCompatActivity() {
             toggleScan()
         }
     }
-
     private fun toggleScan(){
         if(isScanning){
             stopScan()

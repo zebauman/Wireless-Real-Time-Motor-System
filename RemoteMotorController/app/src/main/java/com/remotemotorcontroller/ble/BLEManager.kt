@@ -15,6 +15,7 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.os.Build
+import android.os.ParcelUuid
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import com.remotemotorcontroller.adapter.BleTimeDevice
@@ -45,6 +46,8 @@ object BLEManager {
     private val scannedDevices = mutableListOf<BleTimeDevice>()
     private var isScanning = false
     fun isScanning(): Boolean = isScanning
+
+    private var filterScanDevice = true // DETERMINE whether to filter the BLE devices when scanning based on service UUID
 
     // BLE GATT CLIENT -> ALLOWS FOR CONNECTION TO BLE GATT SERVERS
     // INFORMATION REGARDING DISCOVERING SERVICES, READING, AND WRITING CHARACTERISTICS
@@ -187,7 +190,24 @@ object BLEManager {
         if(cleanupJob == null || !cleanupJob!!.isActive){
             cleanupJob = startCleanupJob()
         }
-        scanner?.startScan(leScanCallback)
+
+        // SETTINGS FOR THE BLE SCANNER
+        val settings = android.bluetooth.le.ScanSettings.Builder().setScanMode(
+            android.bluetooth.le.ScanSettings.SCAN_MODE_BALANCED).build()
+
+        if(filterScanDevice){ // TODO: OPTION TO CHANGE THE SCAN MODE
+            // FILTER FOR BLE SCANNER
+            val filters = mutableListOf<android.bluetooth.le.ScanFilter>().apply{
+                add(
+                    android.bluetooth.le.ScanFilter.Builder().setServiceUuid(
+                        ParcelUuid(BLEContract.SERVICE_MOTOR)).build()
+                )
+                }
+
+            scanner?.startScan(filters, settings, leScanCallback)
+        }else{
+            scanner?.startScan(emptyList(), settings,leScanCallback)
+        }
         isScanning = true
     }
 

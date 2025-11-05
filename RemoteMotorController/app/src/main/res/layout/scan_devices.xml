@@ -52,6 +52,8 @@
                 app:iconTint="?attr/colorOnPrimaryContainer"
                 app:backgroundTint="?attr/colorPrimaryContainer"/>
 
+            <!-- Auto Connect Button -->
+
             <!-- Scanning Progress Indicator -->
             <com.google.android.material.progressindicator.CircularProgressIndicator
                 android:id="@+id/progressIndicator"

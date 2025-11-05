@@ -170,12 +170,18 @@ void bt_ready(int err)
 		.interval_max = 0x40,
 		.peer = NULL,
 	};
-	// ADVERTISING DATA
+
+	// ADVERTISING DATA - 31 BYTES MAX
 	const struct bt_data ad[] = {
+		BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+		BT_DATA_BYTES(BT_DATA_UUID128_ALL,BT_UUID_128_ENCODE(0xc52081ba, 0xe90f, 0x40e4, 0xa99f, 0xccaa4fd11c15)),
+	};
+	// SCAN RESPONSE DATA - 31 BYTES MAX
+	const struct bt_data sd[] = {
 		BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
 	};
 
-	err = bt_le_adv_start(&adv_param, ad, ARRAY_SIZE(ad), NULL, 0);
+	err = bt_le_adv_start(&adv_param, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 	if (err) {
 		LOG_ERR("Advertising failed to start (err %d)", err);
 		return;
