@@ -29,6 +29,8 @@ class ControlActivity : AppCompatActivity() {
     private lateinit var targetRpmEditText: EditText
     private lateinit var targetAngleEditText: EditText
 
+    private lateinit var topAppBar: androidx.appcompat.widget.Toolbar
+
     private lateinit var startMotorButton: MaterialButton
     private lateinit var stopMotorButton: MaterialButton
     private lateinit var sendAngleButton: MaterialButton
@@ -55,6 +57,11 @@ class ControlActivity : AppCompatActivity() {
 
         targetRpmEditText = findViewById(R.id.inputRpm)
         targetAngleEditText = findViewById(R.id.inputAngle)
+
+        topAppBar = findViewById(R.id.topAppBar)
+        topAppBar.setNavigationOnClickListener {
+            finish()
+        }
 
         startMotorButton = findViewById(R.id.buttonStartRpm)
         stopMotorButton = findViewById(R.id.buttonStopRpm)

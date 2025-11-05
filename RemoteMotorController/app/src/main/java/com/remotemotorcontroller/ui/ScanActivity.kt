@@ -17,6 +17,7 @@ import com.remotemotorcontroller.ble.BLEManager
 
 class ScanActivity : AppCompatActivity() {
     private lateinit var scanButton: Button
+    private lateinit var topAppBar: androidx.appcompat.widget.Toolbar
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var deviceAdapter: DeviceAdapter
@@ -76,6 +77,11 @@ class ScanActivity : AppCompatActivity() {
         scanButton = findViewById(R.id.scanButton)
         scanButton.setOnClickListener {
             toggleScan()
+        }
+
+        topAppBar = findViewById(R.id.topAppBar)
+        topAppBar.setNavigationOnClickListener {
+            finish() // GO TO THE VIEW THAT CALL THIS ACTIVITY
         }
     }
     private fun toggleScan(){
