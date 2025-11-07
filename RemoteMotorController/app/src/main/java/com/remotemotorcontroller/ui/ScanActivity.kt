@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.recyclerview.widget.RecyclerView
 import com.remotemotorcontroller.R
+import com.remotemotorcontroller.adapter.BleTimeDevice
 import com.remotemotorcontroller.adapter.DeviceAdapter
 import com.remotemotorcontroller.ble.BLEManager
 
@@ -118,7 +119,7 @@ class ScanActivity : AppCompatActivity() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun connectToDevice(device: BluetoothDevice){
+    private fun connectToDevice(device: BleTimeDevice){
         BLEManager.connect(device)
     }
 }

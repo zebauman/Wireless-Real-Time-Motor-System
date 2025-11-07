@@ -43,7 +43,7 @@ static struct bt_uuid_128 motor_cmd_char_uuid = BT_UUID_INIT_128(
 static struct bt_uuid_128 motor_telemetry_char_uuid = BT_UUID_INIT_128(
 	BT_UUID_128_ENCODE(0x17da15e5, 0x05b1, 0x42df, 0x8d9d, 0xd7645d6d9293));
 
-static uint8_t dev_id_le[6]; // 64-bit device ID LITTLE-ENDIAN
+static uint8_t dev_id_le[6]; // 48-bit device ID LITTLE-ENDIAN
 static uint8_t msd[2 + 6]; // MANUFACTURER SPECIFIC DATA; 2 BYTES COMPANY ID + 6 BYTES DEVICE ID
 
 // FORWARD DECLARATIONS
@@ -51,7 +51,7 @@ void motor_notify_telemetry(void);
 
 
 static void build_ids(void){
-	int ret = hwinfo_get_device_id(dev_id_le, sizeof(dev_id_le));
+	int ret = hwinfo_get_device_id(dev_id_le, sizeof(dev_id_le)); // WILL ONLY GET THE FIRST 6 BYTES
 	if(ret < 0){
 		LOG_ERR("Failed to get device ID from HWINFO (err %d)", ret);
 		memset(dev_id_le, 0, sizeof(dev_id_le));

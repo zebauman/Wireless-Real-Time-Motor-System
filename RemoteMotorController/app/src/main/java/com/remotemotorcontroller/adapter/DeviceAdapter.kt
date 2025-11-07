@@ -15,7 +15,7 @@ import java.time.Instant
 
 class DeviceAdapter(
     private val devices: MutableList<BleTimeDevice>,
-    private val onDeviceClick: (BluetoothDevice) -> Unit
+    private val onDeviceClick: (BleTimeDevice) -> Unit
 ) : RecyclerView.Adapter<DeviceAdapter.DeviceViewHolder>() {
     // ViewHolder is the object that holds the views for a single item in the list -> reuses the same views for multiple items, only showing the ones applicable
     // MANAGES THE RECYCLE VIEW
@@ -52,7 +52,7 @@ class DeviceAdapter(
 
 
         holder.itemView.setOnClickListener {
-            onDeviceClick(device)
+            onDeviceClick(devices[position])
         }
     }
 

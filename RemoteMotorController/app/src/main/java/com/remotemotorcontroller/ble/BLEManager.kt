@@ -12,7 +12,9 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Build
 import android.os.ParcelUuid
@@ -24,9 +26,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 
 @SuppressLint("StaticFieldLeak")
 object BLEManager {
@@ -47,6 +51,7 @@ object BLEManager {
     private var isScanning = false
     fun isScanning(): Boolean = isScanning
 
+    // TODO: ADD TO SETTINGS CONFIG
     private var filterScanDevice = true // DETERMINE whether to filter the BLE devices when scanning based on service UUID
 
     // BLE GATT CLIENT -> ALLOWS FOR CONNECTION TO BLE GATT SERVERS
@@ -54,6 +59,16 @@ object BLEManager {
     private var bluetoothGatt: BluetoothGatt? = null
     private var connectedDevice: BluetoothDevice? = null
     fun getConectedDevice(): BluetoothDevice? = connectedDevice
+    private var userInitDisconnect: Boolean = false
+
+    // TODO: REPLACE THIS WITH SETTING CONFIG
+    private var autoReconnectEnabled = true
+    private var arCompanyId: Int = 0x706D
+    private var arDeviceId: ByteArray? = null
+    private var arTimeoutMs = 20_000L
+    private var arRetryMs = 500L
+    private var scanMode: Int = ScanSettings.SCAN_MODE_LOW_LATENCY
+
 
     @SuppressLint("MissingPermission")
     fun getConnectedDeviceName():String? = connectedDevice?.name
@@ -76,7 +91,8 @@ object BLEManager {
     // COROUTINE SCOPE TO MANAGE BACKGROUND JOB's LIFECYCLE
     //COROUTINE is A FUNCTION THAT CAN PAUSE AND RESUME ITS EXECUTION WITHOUT BLOCKING THE THREAD
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private var cleanupJob: Job? = null
+    private var cleanupJob: Job? = null // PERIODICALLY CLEAN UP THE STALE DEVICES FOR SCANNING
+    private var reconnectJob: Job? = null
 
     private var telemCallback: ((status:Int, speed: Int, position: Int) -> Unit)? = null
 
@@ -87,14 +103,37 @@ object BLEManager {
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             if(newState == BluetoothProfile.STATE_CONNECTED){
-                Log.i("BLE", "CONNECTED TO ${gatt.device?.address}")
                 onConnectionStateChange?.invoke(gatt.device, true)
+                reconnectJob?.cancel()
+                reconnectJob = null
+
                 gatt.discoverServices()
-            }else if(newState == BluetoothProfile.STATE_DISCONNECTED){
-                Log.i("BLE", "DISCONNECTED FROM ${gatt.device?.address}")
+            }
+            else if(newState == BluetoothProfile.STATE_DISCONNECTED){
                 onConnectionStateChange?.invoke(gatt.device, false)
                 gatt.close()
                 bluetoothGatt = null
+
+                // AUTO-RECONNECT IFF NOT-USER INIT, ENABLED, AND TARGET ID
+                if(!userInitDisconnect && autoReconnectEnabled && arDeviceId?.size == 6){
+                    coroutineScope.launch{
+                        Log.i("BLE", "ATTEMPT RECONNECTION")
+                        val settings: ScanSettings = ScanSettings.Builder().setScanMode(scanMode).build()
+
+                        delay(500)
+                        stopScan()
+                        autoReconnect(
+                            lastDevId48 = arDeviceId!!,
+                            companyId = arCompanyId,
+                            serviceUUID = BLEContract.SERVICE_MOTOR,
+                            timeoutMs = arTimeoutMs,
+                            retryInterval = arRetryMs,
+                            scanSettings = settings,
+                            onTimeout = {} // TODO: ADD TIMEOUT FUNCTIONALITY LIKE POPUP STATING DISCONNECTED
+                        )
+                    }
+                }
+                userInitDisconnect = false
             }
         }
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
@@ -107,7 +146,8 @@ object BLEManager {
                 charCmd = serv.getCharacteristic(BLEContract.CHAR_CMD)
                 charTelem = serv.getCharacteristic(BLEContract.CHAR_TELEM)
 
-                charTelem?.let{ enableNotifications(gatt, charTelem!!)}
+                charTelem?.let{ enableNotifications(gatt, it)}
+                Log.i("BLE", "TESTING DEVICE ID: ${arDeviceId}")
 
                 Log.i("BLE", "SERVICES AND CHARACTERISTICS CACHED. NOTIFICATION ENABLED.")
             }else{
@@ -129,7 +169,7 @@ object BLEManager {
 
     // HELPER FUNCTION FOR CONVERTING THE RAW BYTES INTO THE VALUES
     private fun parseTelemetry(value: ByteArray){
-        if(value.size < 9) return;
+        if(value.size < 9) return
         val status = value[0].toInt() and 0xFF
         val speed = ((value[1].toInt() and 0xFF) or ((value[2].toInt() and 0xFF) shl 8) or
                 ((value[3].toInt() and 0xFF) shl 16) or ((value[4].toInt() and 0xFF) shl 24))
@@ -148,25 +188,29 @@ object BLEManager {
 
         // Called when a device is found immediately
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            val device = result.device ?: return
+            coroutineScope.launch{ // USING COROUTINE SCOPE HERE TO MAKE SAFE WITH CLEANUP JOB -> NO RACE CONDITIONS
+                val device = result.device ?: return@launch
 
-            val existing = scannedDevices.find{ it.bDevice.address == device.address}
-            val now = Instant.now()
+                val existing = scannedDevices.find{ it.bDevice.address == device.address}
+                val now = Instant.now()
 
-            if(existing != null){
-                existing.time = now
-                existing.rssi = result.rssi
-                existing.isConnectable = result.isConnectable
-                // INVOKE IS UPDATING THE UI EVERY TIE THE DEVICE IS FOUND/UPDATED -> CALLBACK FUNCTION
-                onDeviceFound?.invoke(existing)
-            }else{
-                val newDevice = BleTimeDevice(
-                    device,
-                    result.rssi,
-                    result.isConnectable,
-                    now)
-                scannedDevices.add(newDevice)
-                onDeviceFound?.invoke(newDevice)
+                if(existing != null){
+                    existing.time = now
+                    existing.rssi = result.rssi
+                    existing.isConnectable = result.isConnectable
+                    // INVOKE IS UPDATING THE UI EVERY TIE THE DEVICE IS FOUND/UPDATED -> CALLBACK FUNCTION
+                    onDeviceFound?.invoke(existing)
+                }else{
+                    val id6 = result.scanRecord?.getManufacturerSpecificData(arCompanyId)
+                    Log.i("BLE", "DEVICE ID: ${id6?.contentToString()}")
+                    val newDevice = BleTimeDevice(
+                        device,
+                        result.rssi,
+                        result.isConnectable,
+                        now, id6)
+                    scannedDevices.add(newDevice)
+                    onDeviceFound?.invoke(newDevice)
+                }
             }
         }
 
@@ -190,19 +234,20 @@ object BLEManager {
         if(cleanupJob == null || !cleanupJob!!.isActive){
             cleanupJob = startCleanupJob()
         }
+        scannedDevices.clear()
 
         // SETTINGS FOR THE BLE SCANNER
-        val settings = android.bluetooth.le.ScanSettings.Builder().setScanMode(
-            android.bluetooth.le.ScanSettings.SCAN_MODE_BALANCED).build()
+        val settings = ScanSettings.Builder().setScanMode(
+            scanMode).build()
 
         if(filterScanDevice){ // TODO: OPTION TO CHANGE THE SCAN MODE
             // FILTER FOR BLE SCANNER
-            val filters = mutableListOf<android.bluetooth.le.ScanFilter>().apply{
+            val filters = mutableListOf<ScanFilter>().apply{
                 add(
-                    android.bluetooth.le.ScanFilter.Builder().setServiceUuid(
+                    ScanFilter.Builder().setServiceUuid(
                         ParcelUuid(BLEContract.SERVICE_MOTOR)).build()
                 )
-                }
+            }
 
             scanner?.startScan(filters, settings, leScanCallback)
         }else{
@@ -215,18 +260,78 @@ object BLEManager {
     fun stopScan() {
         if(!isScanning) return
         scanner?.stopScan(leScanCallback)
-        // CANCEL THE JOB TO STOP THE INFINITE LOOP
+
+        // CANCEL THE JOBS TO STOP THE INFINITE LOOP
         cleanupJob?.cancel()
         cleanupJob = null
+
+        reconnectJob?.cancel()
+        reconnectJob = null
+
         isScanning = false
     }
 
     @SuppressLint("MissingPermission")
-    fun connect(device: BluetoothDevice){
+    fun autoReconnect(
+        lastDevId48: ByteArray,
+        companyId: Int,
+        serviceUUID: UUID,
+        timeoutMs: Long,
+        retryInterval: Long,
+        scanSettings: ScanSettings,
+        onTimeout: () -> Unit
+    ){
+        require(lastDevId48.size == 6){ "deviceId64 must be 6 Bytes (LE)."}
+        if(isScanning()){
+            stopScan()
+        }
+
+        val mask = ByteArray(6){ 0xFF.toByte() }
+        val filters = buildList{
+            add(ScanFilter.Builder().setServiceUuid(
+                ParcelUuid(serviceUUID)).setManufacturerData(
+                companyId, lastDevId48, mask)
+                .build())
+        }
+
+        reconnectJob = coroutineScope.launch{
+            scannedDevices.clear()
+            isScanning = true
+            scanner?.startScan(filters,scanSettings,leScanCallback)
+            val start = System.currentTimeMillis()
+
+            while(System.currentTimeMillis() - start < timeoutMs && isActive){
+                val hit = scannedDevices.firstOrNull()
+
+                if(hit != null){
+                    Log.i("BLE", "RECONNECTION SUCCESS, HIT DEVICE")
+                    stopScan()
+                    connect(hit)
+                    return@launch
+                }
+                delay(retryInterval)
+            }
+            // TIMEOUT
+            stopScan()
+            onTimeout()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun connect(device: BleTimeDevice){
         stopScan()
+        arDeviceId = device.devId
         bluetoothGatt?.close() // CLOSE ANY PREVIOUS CONNECTIONS
-        connectedDevice = device
-        bluetoothGatt = device.connectGatt(appCtx, false, gattCallback)
+        connectedDevice = device.bDevice
+        bluetoothGatt = device.bDevice.connectGatt(appCtx, false, gattCallback)
+    }
+
+    @SuppressLint("MissingPermission")
+    fun disconnect(){
+        bluetoothGatt?.disconnect()
+        bluetoothGatt?.close()
+        connectedDevice = null
+        userInitDisconnect = true
     }
 
     // WRITE/READ FROM THE BLE MOTOR DEVICE
@@ -304,10 +409,12 @@ object BLEManager {
         onDeviceRemoved = listener
     }
 
-    private fun startCleanupJob() : Job{
+    private fun startCleanupJob(
+        delayMs: Long = 5_000
+    ) : Job{
         return coroutineScope.launch {
-            while (true) {
-                delay(5000)
+            while (isActive) {
+                delay(delayMs)
                 val now = Instant.now()
                 val timeout = Duration.ofSeconds(10).toMillis()
 
