@@ -24,7 +24,6 @@ class ShellActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_shell)
 
-        // Bottom nav <-> NavController
         val navHost = supportFragmentManager.findFragmentById(R.id.navHost) as NavHostFragment
         findViewById<BottomNavigationView>(R.id.bottomNav)
             .setupWithNavController(navHost.navController)
@@ -32,29 +31,51 @@ class ShellActivity : AppCompatActivity() {
         deviceHeader = findViewById(R.id.deviceHeader)
         liveSummary  = findViewById(R.id.liveSummary)
 
-        // Disconnect button behavior
-        deviceHeader.setOnDisconnectClick {
-            BLEManager.shutdown()
-        }
+        deviceHeader.setOnDisconnectClick { BLEManager.disconnect() }
 
         lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED){
-                (application as App).repo.settings.collect { appSettings ->
-                    BLEManager.applyConfig(
-                        autoReconnectEnabled = appSettings.ar.autoReconnect,
-                        companyId = appSettings.ar.companyId,
-                        deviceId = appSettings.ar.deviceId6,
-                        arTimeoutMs = appSettings.ar.timeoutMs,
-                        arRetryMs = appSettings.ar.retryInterval,
-                        scanMode = appSettings.ble.scanMode,
-                        cleanupDurationMs = appSettings.ble.cleanupDurationMs,
-                        filterScanDevice = appSettings.ble.filterScanDevice
-                    )
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    (application as App).repo.settings.collect { s ->
+                        BLEManager.applyConfig(
+                            autoReconnectEnabled = s.ar.autoReconnect,
+                            companyId            = s.ar.companyId,
+                            deviceId             = s.ar.deviceId6,
+                            arTimeoutMs          = s.ar.timeoutMs,
+                            arRetryMs            = s.ar.retryInterval,
+                            scanMode             = s.ble.scanMode,
+                            cleanupDurationMs    = s.ble.cleanupDurationMs,
+                            filterScanDevice     = s.ble.filterScanDevice
+                        )
+                    }
+                }
+
+                // Connection header
+                launch {
+                    BLEManager.connectedSummary.collect { cs ->
+                        if (!cs.connected) {
+                            deviceHeader.setConnectionTitle(getString(R.string.msg_not_connected))
+                            deviceHeader.setSubtitle("BLE • Service: Motor • RSSI: — dBm")
+                            deviceHeader.setDisconnectVisible(false)
+                        } else {
+                            val name = cs.name ?: "Unknown"
+                            deviceHeader.setConnectionTitle(
+                                "$name • ${getString(R.string.status_connected)}"
+                            )
+                            deviceHeader.setSubtitle("BLE • Service: Motor")
+                            deviceHeader.setDisconnectVisible(true)
+                        }
+                    }
+                }
+
+                // Live summary
+                launch {
+                    BLEManager.telemetry.collect { t ->
+                        liveSummary.setRpm(t.rpm)
+                        liveSummary.setAngle(t.angle)
+                    }
                 }
             }
         }
-
-
-
     }
 }

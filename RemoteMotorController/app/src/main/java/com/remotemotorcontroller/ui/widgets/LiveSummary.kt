@@ -28,7 +28,7 @@ class LiveSummaryView @JvmOverloads constructor(
         textRpm.text = context.getString(R.string.label_rpm, rpm)
     }
 
-    fun setAngle(angleDeg: Number) {
-        textAngle.text = context.getString(R.string.label_angle, angleDeg.toFloat())
+    fun setAngle(angle: Int) {
+        textAngle.text = context.getString(R.string.label_angle, angle)
     }
 }

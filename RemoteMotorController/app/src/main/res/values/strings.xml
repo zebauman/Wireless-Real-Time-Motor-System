@@ -19,11 +19,11 @@
     <string name="status_connected">Connected</string>
     <string name="status_disconnected">Disconnected</string>
     <string name="ble_summary">BLE • Service: %1$s • RSSI: %2$sdBm</string>
-    <string name="device_named">%1$s</string> <!-- e.g., "NUCLEO-WB55" -->
+    <string name="device_named">%1$s</string>
 
     <!-- Live stats -->
     <string name="label_rpm">RPM: %1$d</string>
-    <string name="label_angle">Angle: %1$.1f°</string>
+    <string name="label_angle">Angle: %1$d°</string>
 
     <!-- Actions / buttons -->
     <string name="calibrate">Calibrate</string>

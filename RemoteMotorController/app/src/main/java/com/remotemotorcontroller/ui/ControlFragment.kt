@@ -107,9 +107,6 @@ class ControlFragment : Fragment(R.layout.fragment_control) {
     @SuppressLint("MissingPermission")
     override fun onStart() {
         super.onStart()
-        if (BLEManager.getConnectedDevice() == null) {
-            Log.e("BLE", "No device connected")
-        }
     }
 
     private fun setStartUi() {

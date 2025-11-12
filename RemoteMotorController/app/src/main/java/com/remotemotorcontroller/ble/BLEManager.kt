@@ -27,6 +27,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.Duration
@@ -35,16 +39,16 @@ import java.util.UUID
 
 @SuppressLint("StaticFieldLeak")
 object BLEManager {
-    // Safe: stores only applicationContext (not Activity context)
+
+    data class Telemetry(val status: Int, val rpm: Int, val angle: Int)
+    private val _telemetry = MutableSharedFlow<Telemetry>(replay = 1, extraBufferCapacity = 16)
+    val telemetry: SharedFlow<Telemetry> = _telemetry
+
+    data class ConnectedSummary(val name: String?, val connected: Boolean)
+    private val _connectedSummary = MutableStateFlow(ConnectedSummary(null, false))
+    val connectedSummary: StateFlow<ConnectedSummary>  = _connectedSummary
+
     private lateinit var appCtx: Context
-
-    fun init(context: Context){
-        appCtx = context.applicationContext
-        bluetoothManager = appCtx.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        bluetoothAdapter = bluetoothManager.adapter
-        scanner = bluetoothAdapter?.bluetoothLeScanner
-    }
-
     private lateinit var bluetoothManager: BluetoothManager
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var scanner: BluetoothLeScanner? = null
@@ -96,6 +100,13 @@ object BLEManager {
 
     private var telemCallback: ((status:Int, speed: Int, position: Int) -> Unit)? = null
 
+    fun init(context: Context){
+        appCtx = context.applicationContext
+        bluetoothManager = appCtx.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        bluetoothAdapter = bluetoothManager.adapter
+        scanner = bluetoothAdapter?.bluetoothLeScanner
+    }
+
     // CALLBACK FUNCTIONS
     // CALLBACK FUNCTION FOR GATT
     private val gattCallback = object : BluetoothGattCallback() {
@@ -103,14 +114,20 @@ object BLEManager {
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             if(newState == BluetoothProfile.STATE_CONNECTED){
-                onConnectionStateChange?.invoke(gatt.device, true)
+                _connectedSummary.value = ConnectedSummary(
+                    name = gatt.device?.name,
+                    connected = true
+                )
                 reconnectJob?.cancel()
                 reconnectJob = null
 
                 gatt.discoverServices()
             }
             else if(newState == BluetoothProfile.STATE_DISCONNECTED){
-                onConnectionStateChange?.invoke(gatt.device, false)
+                _connectedSummary.value = ConnectedSummary(
+                    name = gatt.device?.name,
+                    connected = false
+                )
                 gatt.close()
                 bluetoothGatt = null
 
@@ -147,9 +164,6 @@ object BLEManager {
                 charTelem = serv.getCharacteristic(BLEContract.CHAR_TELEM)
 
                 charTelem?.let{ enableNotifications(gatt, it)}
-                Log.i("BLE", "TESTING DEVICE ID: ${arDeviceId?.contentToString()}")
-
-                Log.i("BLE", "SERVICES AND CHARACTERISTICS CACHED. NOTIFICATION ENABLED.")
             }else{
                 Log.e("BLE", "FAILED TO DISCOVER SERVICES for ${gatt.device?.address}")
             }
@@ -176,10 +190,7 @@ object BLEManager {
         val position = ((value[5].toInt() and 0xFF) or ((value[6].toInt() and 0xFF) shl 8) or
                 ((value[7]).toInt() shl 16) or ((value[8].toInt() and 0xFF) shl 24))
 
-        Log.i("BLE", "Status: $status, Speed: $speed, Position: $position")
-
-        telemCallback?.invoke(status, speed, position)
-
+        _telemetry.tryEmit(Telemetry(status, speed, position))
     }
 
     // CALLBACK FUNCTION FOR BLE SCAN
@@ -202,7 +213,6 @@ object BLEManager {
                     onDeviceFound?.invoke(existing)
                 }else{
                     val id6 = result.scanRecord?.getManufacturerSpecificData(arCompanyId)
-                    Log.i("BLE", "DEVICE ID: ${id6?.contentToString()}")
                     val newDevice = BleTimeDevice(
                         device,
                         result.rssi,
@@ -324,7 +334,6 @@ object BLEManager {
         bluetoothGatt?.close() // CLOSE ANY PREVIOUS CONNECTIONS
         connectedDevice = device.bDevice
         bluetoothGatt = device.bDevice.connectGatt(appCtx, false, gattCallback)
-        Log.i("BLE","DEVICE ID TEST ${arDeviceId.contentToString()}")
     }
 
     @SuppressLint("MissingPermission")

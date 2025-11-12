@@ -30,13 +30,11 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
     private var isScanning = false
 
     private fun requiredPermissions(): Array<String> = buildList{
-        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S){
             add(Manifest.permission.BLUETOOTH_SCAN)
             add(Manifest.permission.BLUETOOTH_CONNECT)
-        }else{
             add(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
     }.toTypedArray()
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
