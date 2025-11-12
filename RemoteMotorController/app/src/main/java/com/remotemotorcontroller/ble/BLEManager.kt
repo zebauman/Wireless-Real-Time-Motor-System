@@ -447,7 +447,6 @@ object BLEManager {
         cleanupDurationMs: Long,
         filterScanDevice: Boolean
     ){
-        Log.i("BLE", "filterscan TEST: $filterScanDevice")
         this.autoReconnectEnabled = autoReconnectEnabled
         this.arCompanyId = companyId
         this.arDeviceId = deviceId

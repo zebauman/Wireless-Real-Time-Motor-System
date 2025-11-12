@@ -22,7 +22,7 @@
 
         <!-- ENTRY POINT FOR THE APPLICATION-->
         <activity
-            android:name=".ui.MainActivity"
+            android:name=".ui.ShellActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -30,10 +30,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        
-        <activity android:name=".ui.ControlActivity"/>
-        <activity android:name=".ui.ScanActivity"/>
-        <activity android:name=".ui.SettingActivity"/>
     </application>
 
 </manifest>

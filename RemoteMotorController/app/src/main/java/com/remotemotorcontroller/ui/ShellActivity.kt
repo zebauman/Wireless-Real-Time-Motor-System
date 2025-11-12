@@ -1,44 +1,40 @@
 package com.remotemotorcontroller.ui
 
-import android.content.Intent
 import android.os.Bundle
-import android.widget.Button
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.navigation.fragment.NavHostFragment
+import androidx.navigation.ui.setupWithNavController
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.remotemotorcontroller.App
-
 import com.remotemotorcontroller.R
 import com.remotemotorcontroller.ble.BLEManager
+import com.remotemotorcontroller.ui.widgets.DeviceHeader
+import com.remotemotorcontroller.ui.widgets.LiveSummaryView
 import kotlinx.coroutines.launch
 
-class MainActivity : AppCompatActivity() {
+class ShellActivity : AppCompatActivity() {
 
-    private lateinit var navScanButton: Button
-    private lateinit var navControlButton: Button
-    private lateinit var navSettingButton: Button
-
+    private lateinit var deviceHeader: DeviceHeader
+    private lateinit var liveSummary: LiveSummaryView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        setContentView(R.layout.activity_shell)
 
-        navScanButton = findViewById(R.id.NavScanButton)
-        navControlButton = findViewById(R.id.NavControlButton)
-        navSettingButton = findViewById(R.id.SettingsButton)
+        // Bottom nav <-> NavController
+        val navHost = supportFragmentManager.findFragmentById(R.id.navHost) as NavHostFragment
+        findViewById<BottomNavigationView>(R.id.bottomNav)
+            .setupWithNavController(navHost.navController)
 
-        navScanButton.setOnClickListener {
-            val intent = Intent(this, ScanFragment::class.java)
-            startActivity(intent)
-        }
-        navControlButton.setOnClickListener {
-            val intent = Intent(this, ControlFragment::class.java)
-            startActivity(intent)
-        }
-        navSettingButton.setOnClickListener{
-            val intent = Intent(this, SettingsFragment::class.java)
-            startActivity(intent)
+        deviceHeader = findViewById(R.id.deviceHeader)
+        liveSummary  = findViewById(R.id.liveSummary)
+
+        // Disconnect button behavior
+        deviceHeader.setOnDisconnectClick {
+            BLEManager.shutdown()
         }
 
         lifecycleScope.launch {
@@ -57,6 +53,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-    }
 
+
+
+    }
 }

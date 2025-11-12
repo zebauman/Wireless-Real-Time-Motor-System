@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24"
+    android:tint="?attr/colorOnSurface">
+    <!-- Left bar -->
+    <path android:fillColor="@android:color/black"
+        android:pathData="M6,5 H10 V19 H6z"/>
+    <!-- Right bar -->
+    <path android:fillColor="@android:color/black"
+        android:pathData="M14,5 H18 V19 H14z"/>
+</vector>

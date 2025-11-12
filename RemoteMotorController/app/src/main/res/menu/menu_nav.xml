@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/nav_scan"
+        android:title="Scan"
+        android:icon="@drawable/ic_bluetooth"
+        app:showAsAction="always" />
+
+    <item
+        android:id="@+id/nav_control"
+        android:title="Control"
+        android:icon="@drawable/ic_control"
+        app:showAsAction="always" />
+
+    <item
+        android:id="@+id/nav_settings"
+        android:title="@string/settings"
+        android:icon="@drawable/ic_tune"
+        app:showAsAction="always" />
+</menu>

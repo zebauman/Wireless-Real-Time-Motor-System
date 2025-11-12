@@ -11,17 +11,6 @@
     tools:context=".ui.MainActivity">
 
     <!-- Top App Bar -->
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/topAppBar"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="?attr/colorPrimary"
-        android:theme="@style/ThemeOverlay.Material3.Dark.ActionBar"
-        app:title="BLE Device Scanner"
-        app:titleCentered="true"
-        app:titleTextAppearance="@style/TextAppearance.Material3.TitleLarge"
-        app:navigationIcon="@drawable/ic_arrow_back"
-        app:navigationContentDescription="Back"/>
 
     <!-- Main Content -->
     <LinearLayout

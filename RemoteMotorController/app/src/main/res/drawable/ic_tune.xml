@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24"
+    android:tint="?attr/colorOnSurface">
+    <!-- Top rail -->
+    <path android:fillColor="@android:color/black" android:pathData="M4,7 H20 V9 H4z"/>
+    <!-- Top knob -->
+    <path android:fillColor="@android:color/black" android:pathData="M10,5 H14 V11 H10z"/>
+
+    <!-- Middle rail -->
+    <path android:fillColor="@android:color/black" android:pathData="M4,12 H20 V14 H4z"/>
+    <!-- Middle knob -->
+    <path android:fillColor="@android:color/black" android:pathData="M6,10 H10 V16 H6z"/>
+
+    <!-- Bottom rail -->
+    <path android:fillColor="@android:color/black" android:pathData="M4,17 H20 V19 H4z"/>
+    <!-- Bottom knob -->
+    <path android:fillColor="@android:color/black" android:pathData="M14,15 H18 V21 H14z"/>
+</vector>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24"
+    android:tint="?attr/colorOnSurface">
+    <!-- Stem -->
+    <path android:fillColor="@android:color/black" android:pathData="M12,4 H14 V12 H12z"/>
+    <!-- Curve -->
+    <path android:fillColor="@android:color/black" android:pathData="M12,12 C8,12 6,14 6,18 V20 H8 V18 C8,15.79 9.79,14 12,14z"/>
+    <!-- Arrow head -->
+    <path android:fillColor="@android:color/black" android:pathData="M10,4 L14,0 18,4 10,4z"/>
+</vector>

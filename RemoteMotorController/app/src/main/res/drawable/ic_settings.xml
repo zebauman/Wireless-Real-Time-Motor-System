@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24"
+    android:tint="?attr/colorOnSurface">
+    <!-- Outer pseudo-gear (octagon) -->
+    <path android:fillColor="@android:color/black"
+        android:pathData="M9,2 H15 L17,5 20,7 V13 L17,15 15,18 H9 L7,15 4,13 V7 L7,5z"/>
+    <!-- Center circle -->
+    <path android:fillColor="@android:color/black"
+        android:pathData="M12,9 A3,3 0,1,1 12,15 A3,3 0,1,1 12,9z"/>
+</vector>

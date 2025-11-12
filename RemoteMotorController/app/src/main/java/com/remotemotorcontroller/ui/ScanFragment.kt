@@ -2,14 +2,17 @@ package com.remotemotorcontroller.ui
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.bluetooth.BluetoothDevice
 import android.content.pm.PackageManager
-import androidx.appcompat.app.AppCompatActivity
+import android.os.Build
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.remotemotorcontroller.App
 import com.remotemotorcontroller.R
@@ -19,7 +22,7 @@ import com.remotemotorcontroller.ble.BLEManager
 import kotlinx.coroutines.launch
 
 
-class ScanActivity : AppCompatActivity() {
+class ScanFragment : Fragment(R.layout.fragment_scan) {
     private lateinit var scanButton: Button
     private lateinit var topAppBar: androidx.appcompat.widget.Toolbar
 
@@ -28,64 +31,62 @@ class ScanActivity : AppCompatActivity() {
 
     private var isScanning = false
 
-    private val requiredPermissions = arrayOf(
-        Manifest.permission.BLUETOOTH_SCAN,
-        Manifest.permission.BLUETOOTH_CONNECT,
-        Manifest.permission.ACCESS_FINE_LOCATION
-    )
-
+    private fun requiredPermissions(): Array<String> = buildList{
+        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S){
+            add(Manifest.permission.BLUETOOTH_SCAN)
+            add(Manifest.permission.BLUETOOTH_CONNECT)
+        }else{
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }.toTypedArray()
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val allGranted = permissions.all { it.value }
+    ) { grants ->
+        val allGranted = grants.values.all { it }
         if (!allGranted) {
-            Toast.makeText(this, "Permissions not granted", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), "Permissions not granted", Toast.LENGTH_SHORT).show()
         }else{
             startScan()
         }
     }
 
     @SuppressLint("MissingPermission")
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.scan_devices)
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
 
-        recyclerView = findViewById(R.id.deviceRecyclerView)
+        recyclerView = view.findViewById(R.id.deviceRecyclerView)
         deviceAdapter = DeviceAdapter(mutableListOf()){ device ->
             connectToDevice(device)
         }
-        recyclerView.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
+        recyclerView.layoutManager = LinearLayoutManager(requireContext())
         recyclerView.adapter = deviceAdapter
 
         BLEManager.setDeviceFoundListener{ device ->
-            runOnUiThread {
-                deviceAdapter.addOrUpdateDevice(device)
+            view.post { deviceAdapter.addOrUpdateDevice(device) }
             }
-        }
+
         BLEManager.setDeviceRemovedListener { device ->
-            runOnUiThread {
-                deviceAdapter.removeDevice(device)
-            }
+            view.post { deviceAdapter.removeDevice(device) }
         }
 
         BLEManager.setConnectionStateListener { device, connected ->
-            runOnUiThread {
+            view.post {
                 if(connected){
-                    Toast.makeText(this, "Connected to ${device.name ?: "Unknown"}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "Connected to ${device.name ?: "Unknown"}", Toast.LENGTH_SHORT).show()
                 }else{
-                    Toast.makeText(this, "Disconnected from ${device.name ?: "Unknown"}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "Disconnected from ${device.name ?: "Unknown"}", Toast.LENGTH_SHORT).show()
                 }
             }
         }
 
-        scanButton = findViewById(R.id.scanButton)
+        scanButton = view.findViewById(R.id.scanButton)
         scanButton.setOnClickListener {
             toggleScan()
         }
 
-        topAppBar = findViewById(R.id.topAppBar)
+        topAppBar = view.findViewById(R.id.topAppBar)
         topAppBar.setNavigationOnClickListener {
-            finish() // GO TO THE VIEW THAT CALL THIS ACTIVITY
+            requireActivity().onBackPressedDispatcher.onBackPressed() // GO TO THE VIEW THAT CALL THIS ACTIVITY
         }
     }
     private fun toggleScan(){
@@ -97,8 +98,8 @@ class ScanActivity : AppCompatActivity() {
     }
 
     private fun checkPermissionsAndScan(){
-        val missingPermissions = requiredPermissions.filter {
-            checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
+        val missingPermissions = requiredPermissions().filter {
+            ContextCompat.checkSelfPermission(requireContext(),it) != PackageManager.PERMISSION_GRANTED
         }
         if(missingPermissions.isEmpty()){
             startScan()
@@ -110,21 +111,21 @@ class ScanActivity : AppCompatActivity() {
     @SuppressLint("MissingPermission")
     private fun startScan(){
         BLEManager.startScan()
-        scanButton.text = getString(R.string.stop_scanning)
+        scanButton.text = "START"
         isScanning = true
     }
 
     @SuppressLint("MissingPermission")
     private fun stopScan(){
         BLEManager.stopScan()
-        scanButton.text = getString(R.string.start_scanning)
+        scanButton.text = "STOP"
         isScanning = false
     }
 
     @SuppressLint("MissingPermission")
     private fun connectToDevice(device: BleTimeDevice){
         BLEManager.connect(device)
-        val repo = (application as App).repo
+        val repo = (requireActivity().application as App).repo
         if(device.devId != null){
             lifecycleScope.launch {
                 repo.setDeviceId6(device.devId!!)
