@@ -25,10 +25,6 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
     override fun onViewCreated(view:View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        view.findViewById<View>(R.id.topAppBar)?.setOnClickListener {
-            requireActivity().onBackPressedDispatcher.onBackPressed()
-        }
-
         repo = SettingsRepository(requireContext())
 
         view.findViewById<View>(R.id.rowBleConfig).setOnClickListener{ showBleSheet() }

@@ -2,7 +2,7 @@
 <navigation xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/nav_graph"
-    app:startDestination="@id/nav_control">
+    app:startDestination="@id/nav_scan">
 
     <fragment
         android:id="@+id/nav_scan"
@@ -20,7 +20,7 @@
         android:label="Settings"/>
 
     <fragment
-        android:id="@+id/nav_more"
+        android:id="@+id/nav_analytics"
         android:name="com.remotemotorcontroller.ui.AnalyticsFragment"
         android:label="Analytics"/>
 </navigation>

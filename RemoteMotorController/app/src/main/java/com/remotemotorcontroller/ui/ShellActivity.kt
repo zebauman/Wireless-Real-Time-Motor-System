@@ -2,6 +2,7 @@ package com.remotemotorcontroller.ui
 
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.isVisible
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -55,15 +56,18 @@ class ShellActivity : AppCompatActivity() {
                     BLEManager.connectedSummary.collect { cs ->
                         if (!cs.connected) {
                             deviceHeader.setConnectionTitle(getString(R.string.msg_not_connected))
-                            deviceHeader.setSubtitle("BLE • Service: Motor • RSSI: — dBm")
+                            deviceHeader.setSubtitle("")
+                            liveSummary.isVisible = false
                             deviceHeader.setDisconnectVisible(false)
                         } else {
                             val name = cs.name ?: "Unknown"
                             deviceHeader.setConnectionTitle(
                                 "$name • ${getString(R.string.status_connected)}"
                             )
-                            deviceHeader.setSubtitle("BLE • Service: Motor")
+                            deviceHeader.setSubtitle("")
                             deviceHeader.setDisconnectVisible(true)
+
+                            liveSummary.isVisible = true
                         }
                     }
                 }

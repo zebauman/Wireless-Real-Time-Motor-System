@@ -340,8 +340,15 @@ object BLEManager {
     fun disconnect(){
         bluetoothGatt?.disconnect()
         bluetoothGatt?.close()
+
+        _connectedSummary.value = ConnectedSummary(
+            name = getConnectedDeviceName(),
+            connected = false
+        )
+
         connectedDevice = null
         userInitDisconnect = true
+
     }
 
     // WRITE/READ FROM THE BLE MOTOR DEVICE
@@ -406,9 +413,6 @@ object BLEManager {
     fun setPosition(pos: Int) = writeCommand(BLEContract.CMD_POSITION, pos)
 
     // SETTERS FOR THE LISTENER FUNCTIONS
-    fun setTelemetryListener(l: (status: Int, speed: Int, position: Int) -> Unit) {
-        telemCallback = l
-    }
     fun setDeviceFoundListener(listener: (BleTimeDevice) -> Unit){
         onDeviceFound = listener
     }

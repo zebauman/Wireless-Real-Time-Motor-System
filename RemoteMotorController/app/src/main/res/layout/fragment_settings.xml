@@ -3,115 +3,154 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="match_parent">
 
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/topAppBar"
-        android:layout_width="match_parent" android:layout_height="?attr/actionBarSize"
-        app:title="Settings"
-        app:navigationIcon="@drawable/ic_arrow_back" />
 
     <ScrollView
-        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
         android:paddingTop="?attr/actionBarSize"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
         <LinearLayout
-            android:orientation="vertical" android:padding="16dp"
-            android:layout_width="match_parent" android:layout_height="wrap_content">
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
 
             <!-- BLE Config card -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardBle"
-                android:layout_width="match_parent" android:layout_height="wrap_content"
-                app:cardCornerRadius="16dp" app:cardElevation="1dp">
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="1dp">
 
                 <LinearLayout
-                    android:orientation="vertical" android:padding="8dp"
-                    android:layout_width="match_parent" android:layout_height="wrap_content">
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="8dp">
 
                     <TextView
-                        android:text="BLE" android:textStyle="bold" android:padding="12dp"
-                        android:layout_width="match_parent" android:layout_height="wrap_content"/>
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:padding="12dp"
+                        android:text="BLE"
+                        android:textStyle="bold" />
 
                     <LinearLayout
                         android:id="@+id/rowBleConfig"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="12dp" android:paddingVertical="14dp"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
                         android:background="?attr/selectableItemBackground"
-                        android:layout_width="match_parent" android:layout_height="wrap_content">
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="12dp"
+                        android:paddingVertical="14dp">
+
                         <TextView
-                            android:text="Configure BLE" android:textSize="16sp"
-                            android:layout_width="0dp" android:layout_height="wrap_content"
-                            android:layout_weight="1"/>
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Configure BLE"
+                            android:textSize="16sp" />
+
                         <ImageView
-                            android:src="@drawable/ic_chevron_right"
                             android:layout_width="20dp"
                             android:layout_height="20dp"
+                            android:src="@drawable/ic_chevron_right"
                             app:tint="?attr/colorOnSurfaceVariant" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <Space android:layout_width="0dp" android:layout_height="16dp"/>
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="16dp" />
 
             <!-- Auto Reconnect card -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardAR"
-                android:layout_width="match_parent" android:layout_height="wrap_content"
-                app:cardCornerRadius="16dp" app:cardElevation="1dp">
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="1dp">
 
                 <LinearLayout
-                    android:orientation="vertical" android:padding="8dp"
-                    android:layout_width="match_parent" android:layout_height="wrap_content">
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="8dp">
 
                     <TextView
-                        android:text="Auto-Reconnect" android:textStyle="bold" android:padding="12dp"
-                        android:layout_width="match_parent" android:layout_height="wrap_content"/>
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:padding="12dp"
+                        android:text="Auto-Reconnect"
+                        android:textStyle="bold" />
 
                     <LinearLayout
                         android:id="@+id/rowARConfig"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="12dp" android:paddingVertical="14dp"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
                         android:background="?attr/selectableItemBackground"
-                        android:layout_width="match_parent" android:layout_height="wrap_content">
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="12dp"
+                        android:paddingVertical="14dp">
+
                         <TextView
-                            android:text="Configure Auto-Reconnect" android:textSize="16sp"
-                            android:layout_width="0dp" android:layout_height="wrap_content"
-                            android:layout_weight="1"/>
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Configure Auto-Reconnect"
+                            android:textSize="16sp" />
+
                         <ImageView
-                            android:src="@drawable/ic_chevron_right"
                             android:layout_width="20dp"
                             android:layout_height="20dp"
+                            android:src="@drawable/ic_chevron_right"
                             app:tint="?attr/colorOnSurfaceVariant" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <Space android:layout_width="0dp" android:layout_height="16dp"/>
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="16dp" />
 
             <!-- About -->
             <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent" android:layout_height="wrap_content"
-                app:cardCornerRadius="16dp" app:cardElevation="1dp">
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="1dp">
 
                 <LinearLayout
                     android:id="@+id/rowAbout"
-                    android:orientation="horizontal"
-                    android:paddingHorizontal="16dp" android:paddingVertical="16dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
                     android:background="?attr/selectableItemBackground"
-                    android:layout_width="match_parent" android:layout_height="wrap_content">
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="16dp"
+                    android:visibility="gone">
+
                     <TextView
-                        android:text="About" android:textSize="16sp"
-                        android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1"/>
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="About"
+                        android:textSize="16sp" />
+
                     <ImageView
-                        android:src="@drawable/ic_chevron_right"
                         android:layout_width="20dp"
                         android:layout_height="20dp"
+                        android:src="@drawable/ic_chevron_right"
                         app:tint="?attr/colorOnSurfaceVariant" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <Space android:layout_width="0dp" android:layout_height="24dp"/>
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="24dp" />
         </LinearLayout>
     </ScrollView>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
