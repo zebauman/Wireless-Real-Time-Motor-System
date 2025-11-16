@@ -7,7 +7,6 @@
     android:layout_height="match_parent"
     android:background="?attr/colorSurface">
 
-    <!-- Header block (Toolbar + device header + live summary) -->
     <com.google.android.material.appbar.AppBarLayout
         android:id="@+id/appBar"
         android:layout_width="0dp"
@@ -37,7 +36,6 @@
             android:layout_height="wrap_content"/>
     </com.google.android.material.appbar.AppBarLayout>
 
-    <!-- Content strictly between header and bottom nav -->
     <androidx.fragment.app.FragmentContainerView
         android:id="@+id/navHost"
         android:name="androidx.navigation.fragment.NavHostFragment"
@@ -50,7 +48,6 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <!-- Bottom navigation pinned to bottom -->
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNav"
         style="@style/Widget.Material3.BottomNavigationView"

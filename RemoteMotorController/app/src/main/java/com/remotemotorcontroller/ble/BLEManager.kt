@@ -84,7 +84,7 @@ object BLEManager {
     // FUNCTION TO CALL WHEN A DEVICE IS FOUND
     private var onDeviceFound: ((BleTimeDevice) -> Unit)? = null
 
-    // FUNCTION TO CALL WHEN A DEVICE IS TO BE REMOVED DEPRECIATED
+    // FUNCTION TO CALL WHEN A DEVICE IS TO BE REMOVED
     private var onDeviceRemoved: ((BleTimeDevice) -> Unit)? = null
 
     // GATT CHARACTERISTICS
@@ -97,8 +97,6 @@ object BLEManager {
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var cleanupJob: Job? = null // PERIODICALLY CLEAN UP THE STALE DEVICES FOR SCANNING
     private var reconnectJob: Job? = null
-
-    private var telemCallback: ((status:Int, speed: Int, position: Int) -> Unit)? = null
 
     fun init(context: Context){
         appCtx = context.applicationContext

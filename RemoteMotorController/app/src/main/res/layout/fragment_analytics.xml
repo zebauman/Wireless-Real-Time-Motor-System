@@ -4,7 +4,6 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <!-- Chart fills all space -->
     <com.github.mikephil.charting.charts.LineChart
         android:id="@+id/chartTelemetry"
         android:layout_width="match_parent"
@@ -17,7 +16,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="end|top"
         android:layout_margin="12dp"
-    app:icon="@drawable/ic_play"
+    app:icon="@drawable/ic_pause"
     app:iconSize="20dp"
     app:rippleColor="?attr/colorPrimary"
     />
