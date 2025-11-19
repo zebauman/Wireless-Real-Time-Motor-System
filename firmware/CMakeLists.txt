@@ -7,4 +7,5 @@ zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_sources(app PRIVATE
   src/main.c
   src/bluetooth/bluetooth.c
+  src/simulation/motor_sim.c
 )

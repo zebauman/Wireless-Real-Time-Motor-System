@@ -7,6 +7,13 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/logging/log.h>
 
+enum motor_cmds{
+	MOTOR_MODE_OFF = 0x00,
+	MOTOR_MODE_INIT = 0x01,
+	MOTOR_MODE_SPEED = 0x02,
+	MOTOR_MODE_POSITION = 0x03
+};
+
 // MOTOR APPLICATION DATA STRUCTURE
 struct motor_app_ctx{
 	// FLAG TO INDICATE IF NOTIFICATIONS ARE ENABLED FOR USER

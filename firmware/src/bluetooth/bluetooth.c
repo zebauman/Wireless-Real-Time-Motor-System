@@ -81,33 +81,10 @@ static ssize_t write_motor(struct bt_conn *conn,
 	motor_ctx.last_cmd = data[0];
 	motor_ctx.last_target = sys_get_le32(&data[1]); // 4 BYTES FOR VALUE
 	LOG_INF("Received command: 0x%02x, Target value: %d", motor_ctx.last_cmd, motor_ctx.last_target);
-
-	// TODO: IMPLEMENT MOTOR CONTROL LOGIC HERE
-	switch(motor_ctx.last_cmd){
-		case 0x00: // SHUTDOWN
-			motor_ctx.motor_status = 0x00; // OFF
-			gpio_pin_set(led_red.port, led_red.pin, 1); // RED LED ON
-			gpio_pin_set(led_blue.port, led_blue.pin, 0); // BLUE LED OFF
-			gpio_pin_set(led_green.port, led_green.pin, 0); // GREEN LED OFF
-			break;
-		case 0x01: // INIT/CALIBRATE
-			motor_ctx.motor_status = 0x01; // ON
-			gpio_pin_set(led_red.port, led_red.pin, 0); // RED LED OFF
-			gpio_pin_set(led_blue.port, led_blue.pin, 1); // BLUE LED ON
-			gpio_pin_set(led_green.port, led_green.pin, 0); // GREEN LED OFF
-			break;
-		case 0x02: // SPEED CONTROL
-			motor_ctx.motor_status = 0x01; // ON
-			gpio_pin_set(led_red.port, led_red.pin, 0); // RED LED OFF
-			gpio_pin_set(led_blue.port, led_blue.pin, 0); // BLUE LED OFF
-			gpio_pin_set(led_green.port, led_green.pin, 1); // GREEN LED ON
-			break;
-		case 0x03: // POSITION CONTROL
-			motor_ctx.motor_status = 0x01; // ON
-			gpio_pin_set(led_red.port, led_red.pin, 0); // RED LED OFF
-			gpio_pin_set(led_blue.port, led_blue.pin, 1); // BLUE LED ON
-			gpio_pin_set(led_green.port, led_green.pin, 1); // GREEN LED ON
-			break;
+	if(motor_ctx.last_cmd == 0x00){
+		motor_ctx.motor_status = 0x00; // OFF
+	}else{
+		motor_ctx.motor_status = 0x01; // ON
 	}
 
 	return len;
