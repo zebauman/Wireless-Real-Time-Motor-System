@@ -18,30 +18,10 @@ LOG_MODULE_REGISTER(bluetooth, LOG_LEVEL_INF);
 #define DEVICE_NAME CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
 #define ADV_LEN 12
-#define MY_COMPANY_ID 0x706D
-
-#define LED0_NODE DT_ALIAS(led0)
-#define LED1_NODE DT_ALIAS(led1)
-#define LED2_NODE DT_ALIAS(led2)
-
-static const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
-static const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(LED1_NODE, gpios);
-static const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
 
 struct motor_app_ctx motor_ctx;
 
-// UUIDS FOR THE SERVICES AND CHARACTERISTICS
-// Custom Service UUID: c52081ba-e90f-40e4-a99f-ccaa4fd11c15
-static const struct bt_uuid_128 motor_srv_uuid = BT_UUID_INIT_128(
-	BT_UUID_128_ENCODE(0xc52081ba, 0xe90f, 0x40e4, 0xa99f, 0xccaa4fd11c15));
-
-// MOTOR COMMAND CHARACTERISTIC UUID: d10b46cd-412a-4d15-a7bb-092a329eed46
-static struct bt_uuid_128 motor_cmd_char_uuid = BT_UUID_INIT_128(
-	BT_UUID_128_ENCODE(0xd10b46cd, 0x412a, 0x4d15, 0xa7bb, 0x092a329eed46));
-
-// MOTOR TELEMETRY CHARACTERISTIC UUID: 17da15e5-05b1-42df-8d9d-d7645d6d9293
-static struct bt_uuid_128 motor_telemetry_char_uuid = BT_UUID_INIT_128(
-	BT_UUID_128_ENCODE(0x17da15e5, 0x05b1, 0x42df, 0x8d9d, 0xd7645d6d9293));
+void watchdog_kick(void);
 
 static uint8_t dev_id_le[6]; // 48-bit device ID LITTLE-ENDIAN
 static uint8_t msd[2 + 6]; // MANUFACTURER SPECIFIC DATA; 2 BYTES COMPANY ID + 6 BYTES DEVICE ID
@@ -76,6 +56,8 @@ static ssize_t write_motor(struct bt_conn *conn,
 	if(len < 5) { // MINIMUM 5 BYTES REQUIRED
 		return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
 	}
+	watchdog_kick();
+
 	const uint8_t *data = buf;
 	// PARSE COMMAND
 	motor_ctx.last_cmd = data[0];
@@ -115,7 +97,7 @@ BT_GATT_SERVICE_DEFINE(motor_svc, BT_GATT_PRIMARY_SERVICE(&motor_srv_uuid),
 	// CLIENT CHARACTERISTIC CONFIGURATION (CCC) - FOR ENABLING/DISABLING NOTIFICATIONS
 	BT_GATT_CCC(motor_ccc_cfg_changed,
 		    BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
-	);
+);
 
 // [STATUS (1 BYTE)] [SPEED (4 BYTES)] [POSITION (4 BYTES)] = 9 BYTES TOTAL
 static inline void pack_telemetry(uint8_t out[9]){
