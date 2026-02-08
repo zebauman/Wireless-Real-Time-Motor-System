@@ -7,87 +7,116 @@ import android.bluetooth.BluetoothStatusCodes
 import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.PriorityBlockingQueue
 
 class BleRequestQueue(
     private val scope: CoroutineScope,
     private val gattProvider: () -> BluetoothGatt?
     ) {
-    private val operationChannel = Channel<BleOperation>(Channel.UNLIMITED)
+    private val queue = PriorityBlockingQueue<BleOperation>()
 
-    private val processingMutex = Mutex()
-
-    private val callbackSignal = Mutex(locked = true)  // PAUSES THE QUEUE UNTIL THE HARDWARE ACKS
+    private val callbackSignal = Mutex(locked = true)
 
     private var queueJob: Job? = null
 
-    fun start(){
-        if(queueJob?.isActive == true) return
+    companion object {
+        const val PRIORITY_CRITICAL = 100
+        const val PRIORITY_HIGH = 50
+        const val PRIORITY_LOW = 1
+    }
 
-        queueJob = scope.launch{
-            for(op in operationChannel){
-                processingMutex.withLock{
-                    val gatt = gattProvider()
-                    if(gatt == null){
-                        Log.e("BLE", "GATT IS NULL -> DROPPING OPERATION")
-                        return@withLock
-                    }
+    fun start() {
+        if (queueJob?.isActive == true) return
 
-                    val success = when(op){
-                        is BleOperation.Write -> executeWrite(gatt, op)
-                    }
+        queueJob = scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                // TAKE FROM THE QUEUE
+                val op = try {
+                    queue.take()
+                } catch (e: InterruptedException) {
+                    break;
+                }
 
-                    if(success){
-                        withTimeoutOrNull(2000){
-                            callbackSignal.withLock {}
-                        }
-                    }
+                // ATTEMPT TO EXECUTE ON THE BLE
+                val gatt = gattProvider()
+                if (gatt == null) {
+                    Log.e("BLE", "GATT IS NULL, DROPPING EXPRESSION")
+                    continue
+                }
+
+                when (op) {
+                    is BleOperation.Write -> processWrite(gatt, op)
                 }
             }
         }
     }
 
+    private suspend fun processWrite(gatt: BluetoothGatt, op: BleOperation.Write){
+        val isWriteWithResponse = (op.writeType == BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+
+        if(!callbackSignal.isLocked) callbackSignal.tryLock()
+
+        val success = executeWrite(gatt, op)
+
+        if(success && isWriteWithResponse){
+
+            withTimeoutOrNull(2000){
+                callbackSignal.withLock {
+                    // WAIT FOR onWriteComplete to unlock it first, only if requested a response
+                }
+            }
+        } else if(!success){
+            Log.e("BLE", "Write execution failed immediately.")
+        }
+        // IF WRITE WITHOUT RESPONSE -> LOOP IMMEDIATELY TO THE NEXT ITEM
+    }
+
     fun stop(){
         queueJob?.cancel()
+        queue.clear()
     }
 
     fun clear(){
-        // EMPTY THE PENDING LIST
-        while(operationChannel.tryReceive().isSuccess) {}
-
-        // UNLOCK THE MUTEX
-        if(callbackSignal.isLocked) {
-            try{
-                callbackSignal.unlock()
-            }catch(e: Exception){}
-        }
+        queue.clear()
+        unlockSignal()
     }
-    fun enqueueWrite(characteristic: BluetoothGattCharacteristic, data: ByteArray){
-        operationChannel.trySend(BleOperation.Write(characteristic, data))
+    fun enqueueWrite(
+        characteristic: BluetoothGattCharacteristic,
+        data: ByteArray,
+        writeType: Int = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+        priority: Int = PRIORITY_LOW){
+        queue.add(BleOperation.Write(characteristic, data, writeType, priority))
     }
 
     fun onWriteComplete() {
-        if(callbackSignal.isLocked) {
+        unlockSignal()
+    }
+
+    private fun unlockSignal() {
+        if(callbackSignal.isLocked){
             try {
                 callbackSignal.unlock()
-            } catch(e: Exception){
-                Log.e("BLE", "FAILED TO UNLOCK CALLBACK SIGNAL: ${e.message}")
+            } catch (e: Exception) {
+
             }
         }
     }
 
     @SuppressLint("MissingPermission")
     private fun executeWrite(gatt: BluetoothGatt, op: BleOperation.Write): Boolean{
-        if(!callbackSignal.isLocked) callbackSignal.tryLock()
-
         return if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU){
-            gatt.writeCharacteristic(op.characteristic, op.payload, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothStatusCodes.SUCCESS
+            val result = gatt.writeCharacteristic(op.characteristic, op.payload, op.writeType)
+            result == BluetoothStatusCodes.SUCCESS
         } else {
+            op.characteristic.writeType = op.writeType
             op.characteristic.value = op.payload
             gatt.writeCharacteristic(op.characteristic)
         }

@@ -15,6 +15,7 @@ import com.remotemotorcontroller.App
 import com.remotemotorcontroller.R
 import com.remotemotorcontroller.adapter.AnalyticsViewModel
 import com.remotemotorcontroller.ble.BLEManager
+import com.remotemotorcontroller.ble.BleState
 import com.remotemotorcontroller.ui.widgets.DeviceHeader
 import com.remotemotorcontroller.ui.widgets.LiveSummaryView
 import kotlinx.coroutines.launch
@@ -59,34 +60,49 @@ class ShellActivity : AppCompatActivity() {
                     }
                 }
 
-                // Connection header
                 launch {
-                    BLEManager.connectedSummary.collect { cs ->
-                        if (!cs.connected) {
-                            deviceHeader.setConnectionTitle(getString(R.string.msg_not_connected))
-                            deviceHeader.setSubtitle("")
-                            liveSummary.isVisible = false
-                            deviceHeader.setDisconnectVisible(false)
-                        } else {
-                            val name = cs.name ?: "Unknown"
-                            deviceHeader.setConnectionTitle(
-                                "$name • ${getString(R.string.status_connected)}"
-                            )
-                            deviceHeader.setSubtitle("")
-                            deviceHeader.setDisconnectVisible(true)
-
-                            liveSummary.isVisible = true
-                        }
+                    BLEManager.state.collect { state ->
+                        updateUiForState(state)
                     }
                 }
+            }
+        }
+    }
+    private fun updateUiForState(state: BleState){
+        when(state){
+            is BleState.Connected -> {
+                val name = state.name ?: "Unknown"
+                deviceHeader.setConnectionTitle("$name • ${getString(R.string.status_connected)}")
+                deviceHeader.setSubtitle("")
+                deviceHeader.setDisconnectVisible(true)
 
-                // Live summary
-                launch {
-                    BLEManager.telemetry.collect { t ->
-                        liveSummary.setRpm(t.rpm)
-                        liveSummary.setAngle(t.angle)
-                    }
+                val telem = state.telemetry
+                if(telem != null){
+                    liveSummary.isVisible = true
+                    liveSummary.setRpm(state.telemetry.rpm)
+                    liveSummary.setAngle(state.telemetry.angle)
+                }else{
+                    liveSummary.isVisible = false
                 }
+
+            }
+            is BleState.Connecting -> {
+                deviceHeader.setConnectionTitle(getString(R.string.status_connecting)) // "Connecting..."
+                deviceHeader.setSubtitle("")
+                deviceHeader.setDisconnectVisible(false)
+                liveSummary.isVisible = false
+            }
+            is BleState.Scanning -> {
+                deviceHeader.setConnectionTitle(getString(R.string.status_scanning)) // "Scanning..."
+                deviceHeader.setSubtitle("")
+                deviceHeader.setDisconnectVisible(false)
+                liveSummary.isVisible = false
+            }
+            is BleState.Disconnected -> {
+                deviceHeader.setConnectionTitle(getString(R.string.msg_not_connected))
+                deviceHeader.setSubtitle("")
+                deviceHeader.setDisconnectVisible(false)
+                liveSummary.isVisible = false
             }
         }
     }

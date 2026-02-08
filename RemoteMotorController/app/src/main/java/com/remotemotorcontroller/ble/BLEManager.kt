@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.Duration
@@ -40,13 +41,8 @@ import java.util.UUID
 @SuppressLint("StaticFieldLeak")
 object BLEManager {
 
-    data class Telemetry(val status: Int, val rpm: Int, val angle: Int)
-    private val _telemetry = MutableSharedFlow<Telemetry>(replay = 1, extraBufferCapacity = 16)
-    val telemetry: SharedFlow<Telemetry> = _telemetry
-
-    data class ConnectedSummary(val name: String?, val connected: Boolean)
-    private val _connectedSummary = MutableStateFlow(ConnectedSummary(null, false))
-    val connectedSummary: StateFlow<ConnectedSummary>  = _connectedSummary
+    private val _state = MutableStateFlow<BleState>(BleState.Disconnected)
+    val state: StateFlow<BleState> = _state.asStateFlow()
 
     private lateinit var appCtx: Context
     private lateinit var bluetoothManager: BluetoothManager
@@ -75,30 +71,27 @@ object BLEManager {
     private var scanMode: Int = ScanSettings.SCAN_MODE_LOW_LATENCY
     private var cleanupDurationMs: Long = 5_000L
 
-
-    @SuppressLint("MissingPermission")
-    fun getConnectedDeviceName():String? = connectedDevice?.name
-
-
-    // FUNCTION TO NOTIFY THE APP WHEN CONNECTION STATE CHANGES -> LISTENER FUNCTIONS
-    private var onConnectionStateChange: ((BluetoothDevice, Boolean) -> Unit)? = null
-
+    // LISTENERS
     // FUNCTION TO CALL WHEN A DEVICE IS FOUND
     private var onDeviceFound: ((BleTimeDevice) -> Unit)? = null
 
     // FUNCTION TO CALL WHEN A DEVICE IS TO BE REMOVED
     private var onDeviceRemoved: ((BleTimeDevice) -> Unit)? = null
 
+
     // GATT CHARACTERISTICS
     private var charCmd: BluetoothGattCharacteristic? = null
     private var charTelem: BluetoothGattCharacteristic? = null
+    private var charHeartbeat: BluetoothGattCharacteristic? = null
 
-
+    // JOBS
     // COROUTINE SCOPE TO MANAGE BACKGROUND JOB's LIFECYCLE
     //COROUTINE is A FUNCTION THAT CAN PAUSE AND RESUME ITS EXECUTION WITHOUT BLOCKING THE THREAD
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var cleanupJob: Job? = null // PERIODICALLY CLEAN UP THE STALE DEVICES FOR SCANNING
     private var reconnectJob: Job? = null
+
+    private var heartbeatJob: Job? = null
 
     fun init(context: Context){
         appCtx = context.applicationContext
@@ -116,48 +109,34 @@ object BLEManager {
         // FUNCTION WHEN THE CONNECTION STATE CHANGES OF THE CONNECTED DEVICE -> MANAGED BY GATT
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            if(status != BluetoothGatt.GATT_SUCCESS){
+                Log.e("BLE", "GATT ERROR $status")
+                disconnect()
+                return
+            }
+
             if(newState == BluetoothProfile.STATE_CONNECTED){
-                _connectedSummary.value = ConnectedSummary(
-                    name = gatt.device?.name,
-                    connected = true
-                )
+                _state.value = BleState.Connecting(gatt.device.name)
                 reconnectJob?.cancel()
                 reconnectJob = null
-
                 gatt.discoverServices()
             }
             else if(newState == BluetoothProfile.STATE_DISCONNECTED){
-                _connectedSummary.value = ConnectedSummary(
-                    name = gatt.device?.name,
-                    connected = false
-                )
+                _state.value = BleState.Disconnected
+
                 gatt.close()
                 bluetoothGatt = null
-
                 requestQueue?.clear()
+                heartbeatJob?.cancel()
 
                 // AUTO-RECONNECT IFF NOT-USER INIT, ENABLED, AND TARGET ID
                 if(!userInitDisconnect && autoReconnectEnabled && arDeviceId?.size == 6){
-                    coroutineScope.launch{
-                        Log.i("BLE", "ATTEMPT RECONNECTION")
-                        val settings: ScanSettings = ScanSettings.Builder().setScanMode(scanMode).build()
-
-                        delay(500)
-                        stopScan()
-                        autoReconnect(
-                            lastDevId48 = arDeviceId!!,
-                            companyId = arCompanyId,
-                            serviceUUID = BLEContract.SERVICE_MOTOR,
-                            timeoutMs = arTimeoutMs,
-                            retryInterval = arRetryMs,
-                            scanSettings = settings,
-                            onTimeout = {} // TODO: ADD TIMEOUT FUNCTIONALITY LIKE POPUP STATING DISCONNECTED
-                        )
-                    }
+                    triggerAutoReconnect()
                 }
                 userInitDisconnect = false
             }
         }
+        @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if(status == BluetoothGatt.GATT_SUCCESS){
                 val serv = gatt.getService(BLEContract.SERVICE_MOTOR)
@@ -167,8 +146,13 @@ object BLEManager {
                 }
                 charCmd = serv.getCharacteristic(BLEContract.CHAR_CMD)
                 charTelem = serv.getCharacteristic(BLEContract.CHAR_TELEM)
+                charHeartbeat = serv.getCharacteristic(BLEContract.CHAR_HEARTBEAT)
 
                 charTelem?.let{ enableNotifications(gatt, it)}
+
+                startHeartbeatLoop()
+
+                _state.value = BleState.Connected(gatt.device.name)
             }else{
                 Log.e("BLE", "FAILED TO DISCOVER SERVICES for ${gatt.device?.address}")
             }
@@ -180,8 +164,13 @@ object BLEManager {
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
-            Log.i("BLE","Current Value = ${value.contentToString()}")
-            parseTelemetry(value)
+            val telemetryData = Telemetry.fromBytes(value)
+
+            val currentState = _state.value
+            if(currentState is BleState.Connected && telemetryData != null){
+                // UPDATE ONLY THE TELEMETRY OF THE STATE
+                _state.value = currentState.copy(telemetry = telemetryData)
+            }
         }
 
         override fun onCharacteristicWrite(
@@ -194,18 +183,6 @@ object BLEManager {
             requestQueue?.onWriteComplete()
         }
 
-    }
-
-    // HELPER FUNCTION FOR CONVERTING THE RAW BYTES INTO THE VALUES
-    private fun parseTelemetry(value: ByteArray){
-        if(value.size < 9) return
-        val status = value[0].toInt() and 0xFF
-        val speed = ((value[1].toInt() and 0xFF) or ((value[2].toInt() and 0xFF) shl 8) or
-                ((value[3].toInt() and 0xFF) shl 16) or ((value[4].toInt() and 0xFF) shl 24))
-        val position = ((value[5].toInt() and 0xFF) or ((value[6].toInt() and 0xFF) shl 8) or
-                ((value[7]).toInt() shl 16) or ((value[8].toInt() and 0xFF) shl 24))
-
-        _telemetry.tryEmit(Telemetry(status, speed, position))
     }
 
     // CALLBACK FUNCTION FOR BLE SCAN
@@ -244,44 +221,126 @@ object BLEManager {
         }
     }
 
+    private fun startHeartbeatLoop() {
+        heartbeatJob?.cancel() // Safety check
+        heartbeatJob = coroutineScope.launch {
+            var counter = 0
+            while (isActive) {
+                // Send heartbeat (incrementing counter or fixed value)
+                sendHeartbeat(counter)
+
+                // Increment and wrap around byte size (0-255) if needed
+                counter = (counter + 1) % 255
+
+                delay(1000L) // Adjust this interval based on firmware requirements
+            }
+        }
+    }
+
+    // --- COMMANDS ---
+    private fun createPayload(cmd: Byte, value: Int): ByteArray {
+        return byteArrayOf(
+            cmd,
+            (value and 0xFF).toByte(),
+            ((value shr 8) and 0xFF).toByte(),
+            ((value shr 16) and 0xFF).toByte(),
+            ((value shr 24) and 0xFF).toByte()
+        )
+    }
+
+    // LOW PRIORITY, DEFAULT (ACK) - USER REQUEST
+    fun setSpeed(rpm: Int){
+        val ch = charCmd ?: return
+        val payload = createPayload(BLEContract.CMD_SPEED, rpm)
+
+        requestQueue?.enqueueWrite(
+            characteristic = ch,
+            data = payload,
+            writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+            priority = BleRequestQueue.PRIORITY_LOW
+        )
+    }
+
+    // LOW PRIORITY, DEFAULT (ACK) - USER REQUEST
+    fun setPosition(pos: Int){
+        val ch = charCmd ?: return
+        val payload = createPayload(BLEContract.CMD_POSITION, pos)
+
+        requestQueue?.enqueueWrite(
+            characteristic = ch,
+            data = payload,
+            writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+            priority = BleRequestQueue.PRIORITY_LOW
+        )
+    }
+
+    // LOW PRIORITY, DEFAULT (ACK) - USER REQUEST
+    fun calibrate(){
+        val ch = charCmd ?: return
+        val payload = createPayload(BLEContract.CMD_CALIBRATE, 0)
+
+        requestQueue?.enqueueWrite(
+            characteristic = ch,
+            data = payload,
+            writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+            priority = BleRequestQueue.PRIORITY_LOW
+        )
+    }
+
+    // CRITICAL PRIORITY, DEFAULT (ACK) - SAFETY CRITICAL (MUST HAPPEN NOW AND BE CONFIRMED)
+    fun shutdown(){
+        val ch = charCmd ?: return
+        val payload = createPayload(BLEContract.CMD_SHUTDOWN, 0)
+
+        requestQueue?.enqueueWrite(
+            characteristic = ch,
+            data = payload,
+            writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+            priority = BleRequestQueue.PRIORITY_CRITICAL
+        )
+    }
+
+    // HIGH PRIORITY (SOLVES STARVATION PROBLEM), NO RESPONSE - MAINTAINS THE CONNECTION
+    fun sendHeartbeat(heartBeatVal: Int){
+        val ch = charHeartbeat ?: return
+        val payload = byteArrayOf(heartBeatVal.toByte())
+
+        requestQueue?.enqueueWrite(
+            characteristic = ch,
+            data = payload,
+            writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE,
+            priority = BleRequestQueue.PRIORITY_HIGH
+        )
+    }
+
+    // --- SCANNING & CONNECTION ---
     @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
     fun startScan() {
-        if(isScanning) return
-        if (scanner == null) {
-            Log.e("BLE", "Bluetooth scanner not available.")
-            return
-        }
-        if(!(bluetoothAdapter?.isEnabled ?: false)){
-            Log.e("BLE", "Bluetooth is disabled")
-            return
-        }
+        if(isScanning || scanner == null || bluetoothAdapter?.isEnabled != true) return
+
         // DON'T START MULTIPLE JOBS -> ONLY ONE
-        if(cleanupJob == null || !cleanupJob!!.isActive){
-            cleanupJob = startCleanupJob(cleanupDurationMs)
-        }
+        if(cleanupJob?.isActive != true) cleanupJob = startCleanupJob(cleanupDurationMs)
+
         scannedDevices.clear()
 
         // SETTINGS FOR THE BLE SCANNER
         val settings = ScanSettings.Builder().setScanMode(
             scanMode).build()
 
-        if(filterScanDevice){ // TODO: OPTION TO CHANGE THE SCAN MODE
-            // FILTER FOR BLE SCANNER
-            val filters = mutableListOf<ScanFilter>().apply{
-                add(
-                    ScanFilter.Builder().setServiceUuid(
-                        ParcelUuid(BLEContract.SERVICE_MOTOR)).build()
-                )
-            }
+        val filters =
+            if (filterScanDevice) listOf(ScanFilter.Builder().
+                setServiceUuid(ParcelUuid(BLEContract.SERVICE_MOTOR)).build())
+            else emptyList()
 
-            scanner?.startScan(filters, settings, leScanCallback)
-        }else{
-            scanner?.startScan(emptyList(), settings,leScanCallback)
-        }
+        scanner?.startScan(filters, settings, leScanCallback)
         isScanning = true
+
+        if(_state.value is BleState.Disconnected){
+            _state.value = BleState.Scanning
+        }
     }
 
-    @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
+    @SuppressLint("MissingPermission")
     fun stopScan() {
         if(!isScanning) return
         scanner?.stopScan(leScanCallback)
@@ -290,10 +349,51 @@ object BLEManager {
         cleanupJob?.cancel()
         cleanupJob = null
 
-        reconnectJob?.cancel()
-        reconnectJob = null
-
         isScanning = false
+
+        if(_state.value is BleState.Scanning){
+            _state.value = BleState.Disconnected
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun connect(device: BleTimeDevice){
+        stopScan()
+        arDeviceId = device.devId
+        bluetoothGatt?.close() // CLOSE ANY PREVIOUS CONNECTIONS
+        connectedDevice = device.bDevice
+        bluetoothGatt = device.bDevice.connectGatt(appCtx, false, gattCallback)
+    }
+
+    @SuppressLint("MissingPermission")
+    fun disconnect(){
+        requestQueue?.clear()
+
+        bluetoothGatt?.disconnect()
+        bluetoothGatt?.close()
+        _state.value = BleState.Disconnected
+        connectedDevice = null
+        userInitDisconnect = true
+    }
+
+
+    private fun triggerAutoReconnect() {
+        coroutineScope.launch{
+            Log.i("BLE", "ATTEMPT RECONNECTION")
+            val settings: ScanSettings = ScanSettings.Builder().setScanMode(scanMode).build()
+
+            delay(500)
+            stopScan()
+            autoReconnect(
+                lastDevId48 = arDeviceId!!,
+                companyId = arCompanyId,
+                serviceUUID = BLEContract.SERVICE_MOTOR,
+                timeoutMs = arTimeoutMs,
+                retryInterval = arRetryMs,
+                scanSettings = settings,
+                onTimeout = {} // TODO: ADD TIMEOUT FUNCTIONALITY LIKE POPUP STATING DISCONNECTED
+            )
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -342,96 +442,31 @@ object BLEManager {
         }
     }
 
-    @SuppressLint("MissingPermission")
-    fun connect(device: BleTimeDevice){
-        stopScan()
-        arDeviceId = device.devId
-        bluetoothGatt?.close() // CLOSE ANY PREVIOUS CONNECTIONS
-        connectedDevice = device.bDevice
-        bluetoothGatt = device.bDevice.connectGatt(appCtx, false, gattCallback)
+    // --- UTILS ---
+
+    // SETTERS FOR THE LISTENER FUNCTIONS
+    fun setDeviceFoundListener(listener: (BleTimeDevice) -> Unit){
+        onDeviceFound = listener
     }
-
-    @SuppressLint("MissingPermission")
-    fun disconnect(){
-        requestQueue?.clear()
-
-        bluetoothGatt?.disconnect()
-        bluetoothGatt?.close()
-
-        _connectedSummary.value = ConnectedSummary(
-            name = getConnectedDeviceName(),
-            connected = false
-        )
-
-        connectedDevice = null
-        userInitDisconnect = true
-
-    }
-
-    // WRITE/READ FROM THE BLE MOTOR DEVICE
-    // TODO: ADD OPERATION QUEUE FOR WRITING AND READING
-    @SuppressLint("MissingPermission")
-    fun writeCommand(cmd: Byte, value: Int){
-        val ch = charCmd
-        if(ch == null){
-            Log.e("BLE", "Command Characteristic not found/ready.")
-            return
-        }
-        // CURRENT FORMAT FOR THE MOTOR STM32 BLE SYSTEM: 1 BYTE COMMAND, 4 BYTES VALUE
-        val b0 = cmd
-        val b1 = (value and 0xFF).toByte()
-        val b2 = ((value shr 8) and 0xFF).toByte()
-        val b3 = ((value shr 16) and 0xFF).toByte()
-        val b4 = ((value shr 24) and 0xFF).toByte()
-
-        val payload = byteArrayOf(b0, b1, b2, b3, b4)
-
-        Log.i("BLE", "Sending command: $cmd, $value")
-
-        requestQueue?.enqueueWrite(ch, payload)
-
+    fun setDeviceRemovedListener(listener: (BleTimeDevice) -> Unit){
+        onDeviceRemoved = listener
     }
 
     // HELPER FUNCTION FOR ENABLING NOTIFICATIONS ON THE BLE GATT FOR A CHARACTERISTIC
     @SuppressLint("MissingPermission")
     private fun enableNotifications(gatt: BluetoothGatt, ch: BluetoothGattCharacteristic){
         // CHECK IF THE CHARACTERISTIC HAS THE PROPERTY OF NOTIFY/INDICATE
-        val ok = gatt.setCharacteristicNotification(ch, true)
-        if(!ok){
-            Log.e("BLE", "Failed to enable notifications for ${ch.uuid}")
-            return
-        }
+        if(!gatt.setCharacteristicNotification(ch, true)) return
 
-        val cccd = ch.getDescriptor(BLEContract.DESC_CCCD)
-        if(cccd == null){
-            Log.e("BLE", "CCCD descriptor not found for ${ch.uuid}")
-            return
-        }
+        val cccd = ch.getDescriptor(BLEContract.DESC_CCCD) ?: return
 
-        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU){
-            gatt.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-        }
-        else{
-            cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        val value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt.writeDescriptor(cccd, value)
+        } else {
+            cccd.value = value
             gatt.writeDescriptor(cccd)
         }
-    }
-
-    // HELPER FUNCTIONS FOR SENDING COMMANDS
-    fun shutdown() = writeCommand(BLEContract.CMD_SHUTDOWN,0)
-    fun calibrate() = writeCommand(BLEContract.CMD_CALIBRATE,0)
-    fun setSpeed(rpm: Int) = writeCommand(BLEContract.CMD_SPEED, rpm)
-    fun setPosition(pos: Int) = writeCommand(BLEContract.CMD_POSITION, pos)
-
-    // SETTERS FOR THE LISTENER FUNCTIONS
-    fun setDeviceFoundListener(listener: (BleTimeDevice) -> Unit){
-        onDeviceFound = listener
-    }
-    fun setConnectionStateListener(listener: (BluetoothDevice, Boolean) -> Unit) {
-        onConnectionStateChange = listener
-    }
-    fun setDeviceRemovedListener(listener: (BleTimeDevice) -> Unit){
-        onDeviceRemoved = listener
     }
 
     private fun startCleanupJob(

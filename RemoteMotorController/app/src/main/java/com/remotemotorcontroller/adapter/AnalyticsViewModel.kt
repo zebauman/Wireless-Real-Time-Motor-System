@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.github.mikephil.charting.data.Entry
 import com.remotemotorcontroller.ble.BLEManager
+import com.remotemotorcontroller.ble.BleState
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
@@ -24,8 +25,13 @@ class AnalyticsViewModel : ViewModel() {
     val updates = _updates.asSharedFlow()
     init{
         viewModelScope.launch{
-            BLEManager.telemetry.collect{t ->
-                appendPoint(t.rpm, t.angle)
+            BLEManager.state.collect{state ->
+
+                if(state is BleState.Connected){
+                    if(state.telemetry != null){
+                        appendPoint(state.telemetry.rpm, state.telemetry.angle)
+                    }
+                }
             }
         }
     }

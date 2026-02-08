@@ -10,6 +10,7 @@
 #include <zephyr/drivers/hwinfo.h>
 
 #include "bluetooth.h"
+#include "watchdog.h"
 #include "motor.h"
 
 LOG_MODULE_REGISTER(bluetooth, LOG_LEVEL_INF);
@@ -123,8 +124,12 @@ static ssize_t write_heartbeat(struct bt_conn *conn,
 	
 	uint8_t diff = new_val - old_val;
 
+	LOG_INF("Heartbeat received: %d, diff = %d", new_val, diff);
+
+
 	// CASE 1: PACKET IS STALE (SAME PACKETS) => DO NOTHING, DON'T KICK THE DOG
 	if(diff == 0){
+		LOG_WRN("Empty heartbeat packet");
 		return len;
 	}
 	// CASE 2: OUT OF SYNC. DIFF IS GREATER THAN 1
@@ -240,7 +245,7 @@ void bt_ready(int err)
 	// ADVERTISING DATA - 31 BYTES MAX
 	const struct bt_data ad[] = {
 		BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)), // FLAGS 3 BYTES
-		BT_DATA_BYTES(BT_DATA_UUID128_ALL,BT_UUID_128_ENCODE(0xc52081ba, 0xe90f, 0x40e4, 0xa99f, 0xccaa4fd11c15)), // MOTOR SERVICE UUID 16 BYTES + 2 BYTES LENGTH/TYPE = 18 BYTES
+		BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_MOTOR_SERVICE_VAL), // MOTOR SERVICE UUID 16 BYTES + 2 BYTES LENGTH/TYPE = 18 BYTES
 		BT_DATA(BT_DATA_MANUFACTURER_DATA, msd, sizeof(msd)), // MANUFACTURER SPECIFIC DATA 6 BYTES + 2 BYTES LENGTH/TYPE = 8 BYTES
 	};
 	// SCAN RESPONSE DATA - 31 BYTES MAX
@@ -263,12 +268,15 @@ static void connected(struct bt_conn *conn, uint8_t err)
 		LOG_ERR("Connection failed (err %u)", err);
 	} else {
 		LOG_INF("Connected");
+		watchdog_kick();
 	}
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	LOG_INF("Disconnected (reason %u)", reason);
+	watchdog_stop();
+	motor_set_target_speed(0);
 }
 
 struct bt_conn_cb conn_callbacks = {

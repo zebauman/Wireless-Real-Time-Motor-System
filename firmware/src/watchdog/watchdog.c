@@ -32,3 +32,8 @@ void watchdog_init(void){
 void watchdog_kick(void){
     k_work_reschedule(&watchdog_work, K_MSEC(WATCHDOG_TIMEOUT_MS));
 }
+
+void watchdog_stop(void){
+    k_work_cancel_delayable(&watchdog_work);
+    LOG_INF("WATCHDOG STOPPED");
+}

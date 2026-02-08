@@ -7,4 +7,6 @@ void watchdog_init(void);
 
 void watchdog_kick(void);
 
+void watchdog_stop(void);
+
 #endif
