@@ -43,16 +43,17 @@ class DeviceAdapter(
     // SHOW DATA IN A SPECIFIC POSITION
     @SuppressLint("MissingPermission")
     override fun onBindViewHolder(holder: DeviceViewHolder, position: Int) {
-        val device = devices[position].bDevice
+        val bleTimeDevice = devices[position]
+        val device = bleTimeDevice.bDevice
 
         holder.nameView.text = device.name ?: "Unknown Device"
         holder.addressView.text = device.address
-        holder.rssiView.text = devices[position].rssi.toString()
-        holder.timeView.text = devices[position].time.toString()
+        holder.rssiView.text = "${bleTimeDevice.rssi} dBm"
+        holder.timeView.text = formatTimeAgo(bleTimeDevice.time)
 
 
         holder.itemView.setOnClickListener {
-            onDeviceClick(devices[position])
+            onDeviceClick(bleTimeDevice)
         }
     }
 
@@ -88,5 +89,14 @@ class DeviceAdapter(
             Log.e("BLE","Device not found in list: ${removeDevice.bDevice.address}")
         }
 
+    }
+
+    private fun formatTimeAgo(instant: Instant): String {
+        val seconds = Duration.between(instant, Instant.now()).seconds
+        return when {
+            seconds < 5  -> "seen just now"
+            seconds < 60 -> "seen ${seconds}s ago"
+            else         -> "seen ${seconds / 60}m ago"
+        }
     }
 }

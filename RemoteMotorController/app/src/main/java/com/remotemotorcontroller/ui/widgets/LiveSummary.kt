@@ -3,6 +3,7 @@ package com.remotemotorcontroller.ui.widgets
 import android.content.Context
 import android.util.AttributeSet
 import android.view.LayoutInflater
+import android.widget.FrameLayout
 import android.widget.TextView
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.chip.Chip
@@ -12,7 +13,7 @@ class LiveSummaryView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0
-) : MaterialCardView(context, attrs, defStyleAttr) {
+) : FrameLayout(context, attrs, defStyleAttr) {
 
     private val textRpm: TextView
     private val textAngle: TextView
