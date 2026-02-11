@@ -13,20 +13,21 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="?attr/colorSurface"
+        app:elevation="0dp"
         app:liftOnScroll="true">
 
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/deviceHeader"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
-            android:layout_marginEnd="12dp"
-            android:layout_marginBottom="8dp"
-            app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
+            android:layout_margin="12dp"
+            app:cardBackgroundColor="@color/white"
             app:cardCornerRadius="16dp"
             app:strokeColor="?attr/colorOutlineVariant"
             app:strokeWidth="1dp"
-            app:layout_scrollFlags="scroll|enterAlways"/>
+            app:layout_scrollFlags="scroll|enterAlways">
+
+        </com.google.android.material.card.MaterialCardView>
     </com.google.android.material.appbar.AppBarLayout>
 
     <androidx.core.widget.NestedScrollView
@@ -34,9 +35,10 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:fillViewport="true"
+        android:clipToPadding="false"
         android:paddingStart="12dp"
         android:paddingEnd="12dp"
-        android:paddingBottom="12dp"
+        android:paddingBottom="24dp"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
         <LinearLayout
@@ -47,14 +49,8 @@
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardCornerRadius="16dp"
-                app:strokeColor="?attr/colorOutline"
-                app:strokeWidth="1dp"/>
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="4dp"
+                app:cardBackgroundColor="@color/white"
                 app:cardCornerRadius="16dp"
                 app:strokeColor="?attr/colorOutline"
                 app:strokeWidth="1dp">
@@ -63,22 +59,32 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="14dp">
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="RPM Control"
+                        android:textStyle="bold"
+                        android:textColor="@color/aggie_maroon"
+                        android:textSize="18sp"
+                        android:layout_marginBottom="12dp"/>
 
                     <com.google.android.material.textfield.TextInputLayout
                         android:id="@+id/inputRpmLayout"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:hint="@string/target_rpm"
                         app:endIconMode="clear_text"
-                        app:counterEnabled="true"
-                        app:counterMaxLength="6">
+                        app:boxStrokeColor="@color/aggie_maroon">
 
                         <com.google.android.material.textfield.TextInputEditText
                             android:id="@+id/inputRpm"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:inputType="number"
+                            android:maxLength="6"
                             tools:text="1200" />
                     </com.google.android.material.textfield.TextInputLayout>
 
@@ -86,7 +92,7 @@
                         android:id="@+id/toggleRpmDirection"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
+                        android:layout_marginTop="12dp"
                         app:singleSelection="true"
                         app:selectionRequired="true"
                         app:checkedButton="@+id/btnRpmCw">
@@ -97,8 +103,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="CCW"
-                            android:tooltipText="Counter-Clockwise"/>
+                            android:text="CCW" />
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnRpmCw"
@@ -106,25 +111,25 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="CW"
-                            android:tooltipText="Clockwise"/>
+                            android:text="CW" />
                     </com.google.android.material.button.MaterialButtonToggleGroup>
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
-                        android:layout_marginTop="10dp">
+                        android:layout_marginTop="12dp">
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/buttonStartStopRpm"
                             style="@style/Widget.Material3.Button"
                             android:layout_width="0dp"
-                            android:layout_height="wrap_content"
+                            android:layout_height="50dp"
                             android:layout_weight="1"
                             android:text="@string/start_rpm"
+                            app:backgroundTint="@color/aggie_maroon"
                             app:icon="@drawable/ic_play"
-                            app:iconPadding="8dp"
+                            app:iconTint="@color/white"
                             app:iconGravity="textStart" />
 
                         <Space
@@ -135,10 +140,11 @@
                             android:id="@+id/buttonCalibrate"
                             style="@style/Widget.Material3.Button.TonalButton"
                             android:layout_width="0dp"
-                            android:layout_height="wrap_content"
+                            android:layout_height="50dp"
                             android:layout_weight="1"
                             android:text="Calibrate"
-                            app:iconPadding="8dp"
+                            app:backgroundTint="@color/off_white"
+                            android:textColor="@color/aggie_maroon"
                             app:iconGravity="textStart" />
                     </LinearLayout>
                 </LinearLayout>
@@ -147,7 +153,8 @@
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="16dp"
+                app:cardBackgroundColor="@color/white"
                 app:cardCornerRadius="16dp"
                 app:strokeColor="?attr/colorOutline"
                 app:strokeWidth="1dp">
@@ -156,13 +163,24 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="14dp">
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Position Control"
+                        android:textStyle="bold"
+                        android:textColor="@color/aggie_maroon"
+                        android:textSize="18sp"
+                        android:layout_marginBottom="12dp"/>
 
                     <com.google.android.material.textfield.TextInputLayout
                         android:id="@+id/inputAngleLayout"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:hint="@string/target_angle">
+                        android:hint="@string/target_angle"
+                        app:boxStrokeColor="@color/aggie_maroon">
 
                         <com.google.android.material.textfield.TextInputEditText
                             android:id="@+id/inputAngle"
@@ -176,7 +194,7 @@
                         android:id="@+id/toggleAngleDirection"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
+                        android:layout_marginTop="12dp"
                         app:singleSelection="true"
                         app:selectionRequired="true"
                         app:checkedButton="@+id/btnAngleCw">
@@ -202,11 +220,12 @@
                         android:id="@+id/buttonSendAngle"
                         style="@style/Widget.Material3.Button"
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
+                        android:layout_height="50dp"
+                        android:layout_marginTop="12dp"
                         android:text="@string/move_to_angle"
+                        app:backgroundTint="@color/aggie_maroon"
                         app:icon="@drawable/ic_arrow_turn"
-                        app:iconPadding="8dp"
+                        app:iconTint="@color/white"
                         app:iconGravity="textStart" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>

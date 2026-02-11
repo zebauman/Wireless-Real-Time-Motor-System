@@ -8,31 +8,40 @@
     android:layout_marginStart="12dp"
     android:layout_marginEnd="12dp"
     android:layout_marginBottom="8dp"
-    app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
-    app:cardCornerRadius="12dp"
-    app:cardElevation="1dp"
-    app:strokeColor="?attr/colorOutlineVariant"
-    app:strokeWidth="1dp">
+
+    app:cardBackgroundColor="@color/white"
+
+    app:cardElevation="0dp"
+
+    app:strokeColor="#E0E0E0"
+    app:strokeWidth="1dp"
+    app:cardCornerRadius="16dp">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:paddingStart="10dp"
-        android:paddingEnd="10dp"
-        android:paddingTop="8dp"
-        android:paddingBottom="8dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
         android:gravity="center_vertical">
 
-        <!-- Device icon -->
+        <ImageView
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@drawable/ic_bluetooth"
+            app:tint="@color/aggie_maroon"
+            android:padding="8dp"
+            android:background="@drawable/shape_circle_faded_maroon"
+            tools:backgroundTint="#20500000"/>
 
-        <!-- Name + subtitle (single line, ellipsized) -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:orientation="vertical"
-            android:layout_marginStart="10dp">
+            android:layout_marginStart="12dp">
 
             <TextView
                 android:id="@+id/textConnection"
@@ -40,9 +49,10 @@
                 android:layout_height="wrap_content"
                 android:maxLines="1"
                 android:ellipsize="end"
+                android:textStyle="bold"
                 android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-                android:textColor="?attr/colorOnSurface"
-                tools:text="NUCLEO-WB55 • Connected" />
+                android:textColor="@color/aggie_maroon"
+                tools:text="NUCLEO-WB55" />
 
             <TextView
                 android:id="@+id/textSubtitle"
@@ -50,33 +60,40 @@
                 android:layout_height="wrap_content"
                 android:maxLines="1"
                 android:ellipsize="end"
+                android:layout_marginTop="2dp"
                 android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                android:textColor="?attr/colorOnSurfaceVariant"
-                tools:text="BLE • Service: Motor • RSSI: −63 dBm" />
+                android:textColor="#757575"
+                tools:text="Connected • RSSI: -63 dBm" />
         </LinearLayout>
 
-        <!-- Thin separator before action -->
         <View
             android:layout_width="1dp"
-            android:layout_height="20dp"
-            android:layout_marginEnd="8dp"
+            android:layout_height="24dp"
+            android:layout_marginEnd="12dp"
             android:layout_marginStart="8dp"
-            android:background="?attr/colorOutline" />
+            android:background="#E0E0E0" />
 
-        <!-- Compact outlined Disconnect button -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonDisconnect"
             style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
+            android:layout_height="40dp"
             android:minWidth="0dp"
             android:text="Disconnect"
             android:textAllCaps="false"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+
+            android:textColor="@color/aggie_maroon"
             app:icon="@drawable/ic_bluetooth"
+            app:iconTint="@color/aggie_maroon"
+
+            app:strokeColor="#4D500000"
+            app:rippleColor="#20500000"
+
             app:iconSize="18dp"
-            app:iconPadding="6dp"
+            app:iconPadding="8dp"
             app:iconGravity="textStart" />
+
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

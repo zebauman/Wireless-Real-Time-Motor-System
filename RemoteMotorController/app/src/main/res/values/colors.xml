@@ -3,4 +3,12 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <color name="purple">#800080</color>
+
+    <color name="aggie_maroon">#500000</color>
+    <color name="aggie_maroon_light">#700018</color>
+    <color name="off_white">#F5F5F7</color>
+    <color name="tech_slate">#1F1F1F</color>
+    <color name="tech_grey_light">#E0E0E0</color>
+    <color name="status_connected">#008542</color>
+    <color name="status_error">#B00020</color>
 </resources>
