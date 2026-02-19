@@ -71,17 +71,9 @@ void motor_sim_update(void)
             curr_speed += 25;
             if (curr_speed > 0) curr_speed = 0;
         }
-        // Update API
-        motor_set_state(MOTOR_STATE_STOPPED);
         break;
 
-    // Note: We don't have a specific INIT state in the target_state logic 
-    // from bluetooth.c anymore (it calls motor_init direct), 
-    // but we can handle it if needed. For now, defaulting to stopped logic.
-
     case MOTOR_STATE_RUNNING_SPEED: {
-        motor_set_state(MOTOR_STATE_RUNNING_SPEED);
-        
         int32_t target = motor_get_target_speed();
         int32_t error  = target - curr_speed;
         int32_t dt     = small_step_signed(error, 0.2f);
@@ -100,8 +92,6 @@ void motor_sim_update(void)
     }
 
     case MOTOR_STATE_RUNNING_POS: {
-        motor_set_state(MOTOR_STATE_RUNNING_POS);
-
         int32_t target = motor_get_target_position();
         int32_t error  = target - curr_pos;
 
@@ -112,7 +102,6 @@ void motor_sim_update(void)
         if (error == 0) {
             /* already at target */
             curr_speed = 0;
-            motor_set_state(MOTOR_STATE_STOPPED); // Reached target
         } else {
             /* simulated rotational speed from error (proportional) */
             curr_speed = clamp_speed(error * 3);
@@ -128,16 +117,21 @@ void motor_sim_update(void)
     }
 
     default:
-        motor_set_state(MOTOR_STATE_STOPPED);
+        curr_speed = 0; // Decay to 0 if unknown state
         break;
     }
 
     // 3. WRITE BACK TO MOTOR API
-    motor_set_speed(curr_speed);
-    motor_set_position(curr_pos);
+    // Note: The Vault handles updating the internal status flags automatically!
+    if (target_mode == MOTOR_STATE_RUNNING_POS) {
+        motor_set_position(curr_pos); // Will set state to RUNNING_POS
+        motor_set_speed(curr_speed);  // Keep speed updated for telemetry
+    } else {
+        motor_set_speed(curr_speed);  // Will set state to RUNNING_SPEED or STOPPED
+        motor_set_position(curr_pos); // Keep position updated
+    }
 
     // 4. NOTIFY IF CHANGED
-    // We check the API's current values against our snapshots
     if (motor_get_position() != prev_pos ||
         motor_get_speed()    != prev_speed ||
         motor_get_full_status() != prev_status) {

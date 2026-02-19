@@ -1,0 +1,59 @@
+/ {
+    aliases {
+        /* Map Zephyr's standard 'adc0' alias to your specific STM32 ADC1 */
+        adc0 = &adc1;
+    };
+
+    chosen {
+        /* Tell Zephyr which PWM controller is the primary one */
+        zephyr,pwm = &pwm1;
+    };
+};
+
+/* --- ADC CONFIGURATION (Hall Sensors) --- */
+&adc1 {
+    status = "okay";
+    /* Default ADC input pins on the board (A=3, B=5, C=6 mapped to PA0, PA1, PC2) */
+    pinctrl-0 = <&adc1_in3_pc2 &adc1_in5_pa0 &adc1_in6_pa1>; 
+    pinctrl-names = "default";
+};
+
+/* --- PWM CONFIGURATION (Motor Phases) --- */
+&pwm1 {
+    status = "okay";
+    /* FIXED: Correctly mapped the complementary (n) pin names here */
+    pinctrl-0 = <&pwm1_ch1_pa8 &pwm1_ch2_pa9 &pwm1_ch3_pa10 
+                 &pwm1_ch1n_pb13 &pwm1_ch2n_pb14 &pwm1_ch3n_pb15>;
+    pinctrl-names = "default";
+};
+
+/* --- PIN MULTIPLEXING (Connecting physical pins to internal timers/ADCs) --- */
+&pinctrl {
+    /* High Side Switches */
+    pwm1_ch1_pa8: pwm1_ch1_pa8 {
+        pinmux = <STM32_PINMUX('A', 8, AF1)>;   /* TIM1_CH1 */
+        bias-pull-down;
+    };
+    pwm1_ch2_pa9: pwm1_ch2_pa9 {
+        pinmux = <STM32_PINMUX('A', 9, AF1)>;   /* TIM1_CH2 */
+        bias-pull-down;
+    };
+    pwm1_ch3_pa10: pwm1_ch3_pa10 {
+        pinmux = <STM32_PINMUX('A', 10, AF1)>;  /* TIM1_CH3 */
+        bias-pull-down;
+    };
+
+    /* Low Side Switches (Complementary) */
+    pwm1_ch1n_pb13: pwm1_ch1n_pb13 {
+        pinmux = <STM32_PINMUX('B', 13, AF1)>;  /* TIM1_CH1N */
+        bias-pull-down;
+    };
+    pwm1_ch2n_pb14: pwm1_ch2n_pb14 {
+        pinmux = <STM32_PINMUX('B', 14, AF1)>;  /* TIM1_CH2N */
+        bias-pull-down;
+    };
+    pwm1_ch3n_pb15: pwm1_ch3n_pb15 {
+        pinmux = <STM32_PINMUX('B', 15, AF1)>;  /* TIM1_CH3N */
+        bias-pull-down;
+    };
+};

@@ -26,6 +26,7 @@
 #define MOTOR_FLAG_MASK				0xF0	// 1111 0000 - ISOLATE FLAGS
 
 
+
 struct motor_stats{
 
 	// SET POINTS - TARGETED VALUES FOR THE MOTOR
@@ -56,19 +57,13 @@ void motor_set_speed(int32_t rpm);
 /** @brief SET THE MOTOR'S POSITION (THIS IS THE ACTUAL VALUE OF THE MOTOR) */
 void motor_set_position(int32_t degrees);
 
-/** @brief Update the motor's internal state (keep flags) */
-void motor_set_state(uint8_t new_state);
-
-/** @brief SET OR CLEAR SPECIFIC DIAGONISTIC FLAGS */
-void motor_set_flag(uint8_t flag, bool active);
-
 void motor_set_sync_warning(bool active);
 void motor_set_overheat_warning(bool active);
 
-// TARGETED SETTERS
-/** @brief SET THE TARGETED/DESIRED MOTOR STATE - ONLY THE LOWER NIBBLES (NO FLAGS)*/
-void motor_set_target_state(uint8_t new_state);
+/** @brief SET THE MOTOR INTO AN EMERGENCY STOP -> SET TARGET/ACTUAL STATE TO ESTOP AND TARGET SPEED TO 0 RPM*/
+void motor_trigger_estop();
 
+// TARGETED SETTERS
 /** @brief SET THE DESIRED MOTOR RPM (STILL NEED TO SET THE TARGET STATE)) */
 void motor_set_target_speed(int32_t rpm);
 

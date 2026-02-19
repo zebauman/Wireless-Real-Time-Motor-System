@@ -1,7 +1,5 @@
 #include "watchdog.h"
 #include <zephyr/logging/log.h>
-#include "motor_sim.h"
-#include "bluetooth.h"
 #include "motor.h"
 
 LOG_MODULE_REGISTER(watchdog, LOG_LEVEL_INF);
@@ -15,10 +13,9 @@ static struct k_work_delayable watchdog_work;  // WORKQUEUE THREAD -> THREAD THA
 static void watchdog_expired(struct k_work *work){
     LOG_ERR("Watchdog Timer Expired - Connection Lost - HALTING MOTOR.");
 
-    motor_set_flag(MOTOR_FLAG_SYNC_BAD, true);
-
-    motor_set_state(MOTOR_STATE_ESTOP);
-    motor_set_target_speed(0);
+    motor_set_sync_warning(true);
+    motor_trigger_estop();
+    
     LOG_INF("MOTOR HALTED");
 }
 

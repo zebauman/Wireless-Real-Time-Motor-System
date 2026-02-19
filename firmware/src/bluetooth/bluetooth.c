@@ -80,12 +80,10 @@ static ssize_t write_motor(struct bt_conn *conn,
 	// DETERMINE THE NEW STATE OF THE MOTOR
 	switch(cmd){
 		case MOTOR_MODE_SPEED:	// SET TARGET SPEED
-			motor_set_target_state(MOTOR_STATE_RUNNING_SPEED);
 			motor_set_target_speed(val);
 			break;
 
 		case MOTOR_MODE_POSITION:	// SET TARGET POSITION
-			motor_set_target_state(MOTOR_STATE_RUNNING_POS);
 			motor_set_target_position(val);
 			break;
 
@@ -94,7 +92,6 @@ static ssize_t write_motor(struct bt_conn *conn,
 			break;
 
 		case MOTOR_MODE_OFF:
-			motor_set_target_state(MOTOR_STATE_STOPPED);
 			motor_set_target_speed(0);
 			break;
 		default:
