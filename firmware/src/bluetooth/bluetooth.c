@@ -9,6 +9,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/hwinfo.h>
 
+
 #include "bluetooth.h"
 #include "watchdog.h"
 #include "motor.h"
@@ -44,6 +45,22 @@ static uint8_t msd[2 + 6]; // MANUFACTURER SPECIFIC DATA; 2 BYTES COMPANY ID + 6
 
 // FORWARD DECLARATIONS
 void motor_notify_telemetry(void);
+
+/* * Telemetry Thread: 
+ * Wakes up every 100ms (10Hz) and pushes the latest Motor Vault data to the BLE App.
+ */
+static void telemetry_thread_fn(void *arg1, void *arg2, void *arg3)
+{
+    while (1) {
+        // Push the latest database state to the phone
+        motor_notify_telemetry(); 
+        
+        // Sleep for 100ms (10 updates per second)
+        k_msleep(100);
+    }
+}
+
+K_THREAD_DEFINE(telemetry_tid, 1024, telemetry_thread_fn, NULL, NULL, NULL, 7, 0, 0);
 
 
 static void build_ids(void){
@@ -214,7 +231,7 @@ void motor_notify_telemetry(void)
 	if (err) {
 		LOG_ERR("Failed to send notification (err %d)", err);
 	} else {
-		LOG_INF("Telemetry notification sent");
+		// LOG_INF("Telemetry notification sent");
 	}
 }
 
@@ -225,6 +242,8 @@ void bt_ready(int err)
 		LOG_ERR("Bluetooth init failed (err %d)", err);
 		return;
 	}
+
+
 	motor_ctx.heartbeat_val = 0;
 	motor_ctx.notification_enabled = false;
 

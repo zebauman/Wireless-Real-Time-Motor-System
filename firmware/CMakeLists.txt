@@ -11,6 +11,8 @@ target_sources(app PRIVATE
   src/motor/motor.c
 
   src/motor_control/motor_control.c
-  src/motor_control/bldc_driver.c
   src/motor_control/pid.c
+
+  src/motor_control/bldc_driver.c
+  #src/simulation/bldc_driver_sim.c
 )

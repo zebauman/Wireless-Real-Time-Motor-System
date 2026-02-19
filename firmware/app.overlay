@@ -1,33 +1,45 @@
 / {
     aliases {
-        /* Map Zephyr's standard 'adc0' alias to your specific STM32 ADC1 */
-        adc0 = &adc1;
+        /* Aliases for our new digital Hall sensor pins */
+        hall-u = &hall_u_pin;
+        hall-v = &hall_v_pin;
+        hall-w = &hall_w_pin;
     };
 
-    chosen {
-        /* Tell Zephyr which PWM controller is the primary one */
-        zephyr,pwm = &pwm1;
+    /* Define the Hall sensors as standard GPIO inputs */
+    hall_sensors {
+        compatible = "gpio-keys"; 
+        
+        hall_u_pin: hall_u {
+            /* PC2 */
+            gpios = <&gpioc 2 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+        };
+        hall_v_pin: hall_v {
+            /* PA0 */
+            gpios = <&gpioa 0 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+        };
+        hall_w_pin: hall_w {
+            /* PA1 */
+            gpios = <&gpioa 1 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+        };
     };
 };
 
-/* --- ADC CONFIGURATION (Hall Sensors) --- */
-&adc1 {
+/* --- BARE-METAL TIMER CONFIGURATION --- */
+&timers1 {
     status = "okay";
-    /* Default ADC input pins on the board (A=3, B=5, C=6 mapped to PA0, PA1, PC2) */
-    pinctrl-0 = <&adc1_in3_pc2 &adc1_in5_pa0 &adc1_in6_pa1>; 
-    pinctrl-names = "default";
+    
+    pwm1: pwm {
+        status = "okay"; /* Let Zephyr enable the pin multiplexing at boot */
+        
+        /* Pins MUST be declared in the child node */
+        pinctrl-0 = <&pwm1_ch1_pa8 &pwm1_ch2_pa9 &pwm1_ch3_pa10 
+                     &pwm1_ch1n_pb13 &pwm1_ch2n_pb14 &pwm1_ch3n_pb15>;
+        pinctrl-names = "default";
+    };
 };
 
-/* --- PWM CONFIGURATION (Motor Phases) --- */
-&pwm1 {
-    status = "okay";
-    /* FIXED: Correctly mapped the complementary (n) pin names here */
-    pinctrl-0 = <&pwm1_ch1_pa8 &pwm1_ch2_pa9 &pwm1_ch3_pa10 
-                 &pwm1_ch1n_pb13 &pwm1_ch2n_pb14 &pwm1_ch3n_pb15>;
-    pinctrl-names = "default";
-};
-
-/* --- PIN MULTIPLEXING (Connecting physical pins to internal timers/ADCs) --- */
+/* --- PIN MULTIPLEXING --- */
 &pinctrl {
     /* High Side Switches */
     pwm1_ch1_pa8: pwm1_ch1_pa8 {

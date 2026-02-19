@@ -18,6 +18,7 @@
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
+
 int main(void)
 {
     LOG_INF("Starting BLDC Hardware Motor Control Application");    
