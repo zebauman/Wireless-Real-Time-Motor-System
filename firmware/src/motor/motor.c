@@ -59,6 +59,12 @@ void motor_set_speed(int32_t rpm){
     k_mutex_unlock(&m_stats_lock);
 }
 
+void motor_set_filtered_speed(int32_t rpm){
+    k_mutex_lock(&m_stats_lock, K_FOREVER);
+    m_stats.filtered_speed = rpm;
+    k_mutex_unlock(&m_stats_lock);
+}
+
 void motor_set_position(int32_t degrees){
     k_mutex_lock(&m_stats_lock, K_FOREVER);
     m_stats.current_position = degrees; // SHOULD BE CORRECT VALUE SINCE PASSED DIRECTLY FROM MOTOR LOGIC
@@ -143,6 +149,14 @@ int32_t motor_get_speed(void){
     k_mutex_unlock(&m_stats_lock);
     return val;
 }
+
+int32_t motor_get_filtered_speed(void){
+    k_mutex_lock(&m_stats_lock, K_FOREVER);
+    int32_t val = m_stats.filtered_speed;
+    k_mutex_unlock(&m_stats_lock);
+    return val;
+}
+
 
 int32_t motor_get_position(void){
     k_mutex_lock(&m_stats_lock, K_FOREVER);

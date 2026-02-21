@@ -11,9 +11,9 @@
 LOG_MODULE_REGISTER(bldc_driver, LOG_LEVEL_INF);
 
 /* --- HARDWARE CONSTANTS --- */
-// Assuming an 80MHz System Clock. 80,000,000 / 4000 = 20kHz PWM frequency.
+// 30MHz System Clock. 30,000,000 / 1500 = 20kHz PWM frequency.
 // You may need to adjust this depending on your specific STM32 chip's clock tree!
-#define TIM1_ARR 4000 
+#define TIM1_ARR 1500 
 #define DEADTIME_TICKS 50 // Hardware safety delay to prevent shoot-through
 #define POLE_PAIRS 8
 
@@ -27,7 +27,9 @@ static const struct gpio_dt_spec hall_w = GPIO_DT_SPEC_GET(DT_ALIAS(hall_w), gpi
 static struct gpio_callback hall_u_cb;
 static struct gpio_callback hall_v_cb;
 static struct gpio_callback hall_w_cb;
-static uint32_t last_cycle_count = 0;
+
+static volatile uint32_t last_cycle_count = 0;
+static volatile int current_direction_ccw = 0;
 
 void hall_isr_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
 
@@ -37,7 +39,7 @@ void hall_isr_callback(const struct device *dev, struct gpio_callback *cb, uint3
 int bldc_driver_init(void) {
     LOG_INF("Initializing Hardware Driver (Bare-Metal Timer + GPIO)...");
 
-    // 1. Initialize Fast Digital Hall Sensor GPIOs
+    // Initialize Fast Digital Hall Sensor GPIOs
     if (!gpio_is_ready_dt(&hall_u) || !gpio_is_ready_dt(&hall_v) || !gpio_is_ready_dt(&hall_w)) {
         LOG_ERR("Hall sensor GPIOs not ready!");
         return -1;
@@ -46,14 +48,14 @@ int bldc_driver_init(void) {
     gpio_pin_configure_dt(&hall_v, GPIO_INPUT);
     gpio_pin_configure_dt(&hall_w, GPIO_INPUT);
 
-    // 2. Enable the clock for the Advanced Motor Control Timer (TIM1)
+    // Enable the clock for the Advanced Motor Control Timer (TIM1)
     LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_TIM1);
 
-    // 3. Configure Timer for 20kHz
+    // Configure Timer for 20kHz
     LL_TIM_SetPrescaler(TIM1, 0); 
     LL_TIM_SetAutoReload(TIM1, TIM1_ARR); 
 
-    // 4. Configure all 3 channels for PWM Mode 1
+    // Configure all 3 channels for PWM Mode 1
     LL_TIM_OC_SetMode(TIM1, LL_TIM_CHANNEL_CH1, LL_TIM_OCMODE_PWM1);
     LL_TIM_OC_SetMode(TIM1, LL_TIM_CHANNEL_CH2, LL_TIM_OCMODE_PWM1);
     LL_TIM_OC_SetMode(TIM1, LL_TIM_CHANNEL_CH3, LL_TIM_OCMODE_PWM1);
@@ -63,10 +65,10 @@ int bldc_driver_init(void) {
     LL_TIM_OC_EnablePreload(TIM1, LL_TIM_CHANNEL_CH2);
     LL_TIM_OC_EnablePreload(TIM1, LL_TIM_CHANNEL_CH3);
 
-    // 5. THE MAGIC: Insert Hardware Dead-Time
+    //  Insert Hardware Dead-Time
     LL_TIM_OC_SetDeadTime(TIM1, DEADTIME_TICKS);
 
-    // 6. Enable Main Output (MOE) and Start the Counter
+    // Enable Main Output (MOE) and Start the Counter
     LL_TIM_EnableAllOutputs(TIM1);
     LL_TIM_EnableCounter(TIM1);
 
@@ -89,7 +91,7 @@ int bldc_driver_init(void) {
 }
 
 void hall_isr_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
-uint32_t now = k_cycle_get_32();
+    uint32_t now = k_cycle_get_32();
     uint32_t dt_cycles = now - last_cycle_count;
     
     // Catch the first boot cycle
@@ -105,12 +107,15 @@ uint32_t now = k_cycle_get_32();
     uint32_t dt_us = (uint32_t)(((uint64_t)dt_cycles * 1000000) / cycles_per_sec);
     if (dt_us < 50) return; 
 
-    // Pure Integer Math! Much faster, no floating point errors.
+    uint8_t current_step = bldc_read_hall_state();
+    bldc_set_commutation(current_step, current_direction_ccw);
+
     // 1 mech rev = 48 steps (8 pole pairs * 6 states). 60 / 48 = 5/4.
     int32_t mech_rpm = (int32_t)((cycles_per_sec * 5) / (dt_cycles * 4));
     
-    // Add direction logic (1 for CW, -1 for CCW) based on hall sequence here if needed
-    // mech_rpm *= direction;
+    if(current_direction_ccw){
+        mech_rpm = -mech_rpm;
+    }
 
     motor_set_speed(mech_rpm);
 }
@@ -119,13 +124,14 @@ uint32_t now = k_cycle_get_32();
  * SENSOR READS                                                              *
  * ========================================================================= */
 int bldc_read_hall_state(void) {
-    // Read the digital pins (takes mere nanoseconds instead of milliseconds!)
-    int u = gpio_pin_get_dt(&hall_u);
+    // Read the digital pins (takes mere nanoseconds instead of milliseconds)
+    // USING GPIOS to read the hall effect sensors instead of ADC for nanosecond delay instead of milisecond delay
+    int u = gpio_pin_get_dt(&hall_u);   // HALL EFFECT VALUE IS ONE IF PASSED ELSE ZERO
     int v = gpio_pin_get_dt(&hall_v);
     int w = gpio_pin_get_dt(&hall_w);
     
     // Combine into a 3-bit state (1 to 6)
-    return (u << 2) | (v << 1) | w;
+    return (u << 2) | (v << 1) | w; // RETURN 3-bit OUTPUT STATE WHERE [3'b2 = u, 3'b1 = v, 3'b0 = w]
 }
 
 /* ========================================================================= *
@@ -148,7 +154,12 @@ void bldc_set_commutation(uint8_t step, int ccw) {
                     TIM_CCER_CC2E | TIM_CCER_CC2NE |
                     TIM_CCER_CC3E | TIM_CCER_CC3NE);
 
-    if(step == 0) return;
+    if(step == 0) {
+        printf("Commutation Step 0: All phases OFF\n");
+        return;
+    }
+
+    const char* phase_log = "Unknown State";
 
     // Apply the correct phases. The hardware dead-time automatically ensures
     // that the High side and Low side don't cross over and short circuit!
@@ -156,49 +167,77 @@ void bldc_set_commutation(uint8_t step, int ccw) {
         // --- CLOCKWISE (States 1-6) ---
         case 1: // W+ V-
             TIM1->CCER |= TIM_CCER_CC3E | TIM_CCER_CC2NE;
+            phase_log = "W: HIGH, V: LOW,  U: OFF";
             break;
         case 5: // U+ V-
             TIM1->CCER |= TIM_CCER_CC1E | TIM_CCER_CC2NE;
+            phase_log = "U: HIGH, V: LOW,  W: OFF";
             break;
         case 4: // U+ W-
             TIM1->CCER |= TIM_CCER_CC1E | TIM_CCER_CC3NE;
+            phase_log = "U: HIGH, W: LOW,  V: OFF";
             break;
         case 6: // V+ W-
             TIM1->CCER |= TIM_CCER_CC2E | TIM_CCER_CC3NE;
+            phase_log = "V: HIGH, W: LOW,  U: OFF";
             break;
         case 2: // V+ U-
             TIM1->CCER |= TIM_CCER_CC2E | TIM_CCER_CC1NE;
+            phase_log = "V: HIGH, U: LOW,  W: OFF";
             break;
         case 3: // W+ U-
             TIM1->CCER |= TIM_CCER_CC3E | TIM_CCER_CC1NE;
+            phase_log = "W: HIGH, U: LOW,  V: OFF";
             break;
 
         // --- COUNTER-CLOCKWISE (States 9-14) (+8 offset) ---
         case 9: // U+ V-
             TIM1->CCER |= TIM_CCER_CC1E | TIM_CCER_CC2NE;
+            phase_log = "U: HIGH, V: LOW,  W: OFF";
             break;
         case 13: // W+ V-
             TIM1->CCER |= TIM_CCER_CC3E | TIM_CCER_CC2NE;
+            phase_log = "W: HIGH, V: LOW,  U: OFF";
             break;
         case 12: // W+ U-
             TIM1->CCER |= TIM_CCER_CC3E | TIM_CCER_CC1NE;
+            phase_log = "W: HIGH, U: LOW,  V: OFF";
             break;
         case 14: // V+ U-
             TIM1->CCER |= TIM_CCER_CC2E | TIM_CCER_CC1NE;
+            phase_log = "V: HIGH, U: LOW,  W: OFF";
             break;
         case 10: // V+ W-
             TIM1->CCER |= TIM_CCER_CC2E | TIM_CCER_CC3NE;
+            phase_log = "V: HIGH, W: LOW,  U: OFF";
             break;
         case 11: // U+ W-
             TIM1->CCER |= TIM_CCER_CC1E | TIM_CCER_CC3NE;
+            phase_log = "U: HIGH, W: LOW,  V: OFF";
             break;
     }
+
+    // Output the log
+    // printf("Dir: %s | Step %2d | %s\n", (step > 8) ? "CCW" : "CW ", step, phase_log);
 }
 
-int bldc_rpm_to_pulse(int rpm) {
-    // NOTE: You will need to recalculate your linear regression!
-    // Your old math output a timer period in nanoseconds (up to 50000).
-    // Now, it needs to output a value between 0 and TIM1_ARR (4000).
-    // Example placeholder mapping 0-5000 RPM to 0-4000 Pulse:
-    return (int)((float)rpm * (4000.0f / 5000.0f)); 
+int bldc_percent_to_pulse(float percent_duty_cycle) {
+    // 100% duty cycle = TIM1_ARR (1500)
+    // We multiply the percentage by (1500 / 100.0) which is 15.0
+    int pulse = (int)(percent_duty_cycle * 15.0f);
+    
+    if (pulse > TIM1_ARR) pulse = TIM1_ARR;
+    if (pulse < 0) pulse = 0;
+    
+    return pulse;
+}
+
+// GETTERS
+uint32_t bldc_get_last_cycle_count(void){
+    return last_cycle_count;
+}
+
+// SETTER
+void bldc_set_direction_setter(int ccw){
+    current_direction_ccw = ccw;
 }

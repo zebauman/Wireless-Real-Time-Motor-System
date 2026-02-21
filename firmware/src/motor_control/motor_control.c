@@ -1,87 +1,101 @@
-#include <zephyr/kernel.h>
-#include <zephyr/logging/log.h>
+    #include <zephyr/kernel.h>
+    #include <zephyr/logging/log.h>
 
-#include "motor_control.h"
-#include "motor.h"         // Your thread-safe Vault
-#include "bldc_driver.h"   // The abstracted hardware layer
-#include "pid.h"           // PID math
+    #include "motor_control.h"
+    #include "motor.h"
+    #include "bldc_driver.h"
+    #include "pid.h"
 
-LOG_MODULE_REGISTER(motor_control, LOG_LEVEL_INF);
+    LOG_MODULE_REGISTER(motor_control, LOG_LEVEL_INF);
 
-/* --- THREAD DEFINITIONS --- */
-#define STACK_SIZE 1024
-#define PRIO_COMMUTATION 3 // Highest priority: precise motor timing
-#define PRIO_PID         5 // Medium priority: control math
+    #define POLE_PAIRS 8    // DEFINED BY THE HARDWARE OF THE MOTOR
 
-K_THREAD_STACK_DEFINE(comm_stack, STACK_SIZE);
-K_THREAD_STACK_DEFINE(pid_stack, STACK_SIZE);
+    /* --- THREAD DEFINITIONS --- */
+    #define STACK_SIZE      1024
+    #define PRIO_COMMUTATION 3 // Highest priority: precise motor timing
+    #define PRIO_PID         5 // Medium priority: control math
 
-static struct k_thread comm_thread_data;
-static struct k_thread pid_thread_data;
+    #define PID_PERIOD_MS   10  // PERIOD OF TIME FOR PID CTRL LOOP 1/p = hz -> 10ms period = 100Hz
 
-/* --- INTERNAL CONTROL STATE --- */
-static uint8_t prev_hall_state = 0;
-static int counter_clockwise = 0; // 0 for CW, 1 for CCW
-static pid_struct rpm_pid;
-#define POLE_PAIRS 8
+    // K_THREAD_STACK_DEFINE(comm_stack, STACK_SIZE); // USING ISR THERAD NOT needed
+    K_THREAD_STACK_DEFINE(pid_stack, STACK_SIZE);
+
+   // static struct k_thread comm_thread_data;
+    static struct k_thread pid_thread_data;
+
+    /* --- INTERNAL CONTROL STATE --- */
+    static uint8_t prev_hall_state = 0;
+    static int counter_clockwise = 0; // 0 for CW, 1 for CCW
+    static pid_struct rpm_pid;
 
 
-/* ========================================================================= *
- * 2. PID CONTROL LOOP (Reads from the Vault and applies PWM)                *
- * Runs at 100ms. Compares Target RPM vs Actual RPM.                         *
- * ========================================================================= */
-void pid_control_thread(void *p1, void *p2, void *p3) {
-    LOG_INF("PID control thread started.");
+    /* ========================================================================= *
+    * 2. PID CONTROL LOOP (Reads from the Vault and applies PWM)                *
+    * Runs at 100ms. Compares Target RPM vs Actual RPM.                         *
+    * ========================================================================= */
+    void pid_control_thread(void *p1, void *p2, void *p3) {
+        LOG_INF("PID control thread started.");
+        uint32_t cycles_per_second = sys_clock_hw_cycles_per_sec();
 
-    // Allow PID to output negative numbers to slow down the motor
-    pid_init(&rpm_pid, 0.2f, 0.05f, 0.01f, -1000.0f, 5000.0f);
-    
-    while (1) {
-        // Ask the Vault for the latest targets and actuals
-        uint8_t target_state = motor_get_target_state(); 
-        int32_t target_rpm   = motor_get_target_speed();
-        int32_t actual_rpm   = motor_get_speed();
+        uint32_t timeout_cycles = cycles_per_second / 10;   // NUMBER OF CPU CYCLES TO TIMEOUT - 100ms timeout (1second/10)
+        
+        float min_pwm_duty = 6.0f;
+        float max_pwm_duty = 96.0f;
+        // Allow PID to output negative numbers to slow down the motor - 2 second stall timeot
+        pid_init(&rpm_pid, 0.05f, 0.01f, 0.005f, min_pwm_duty, max_pwm_duty, 2.0f);
 
-        // Check if Bluetooth (or internal logic) wants the motor running
-        if (target_state == MOTOR_STATE_RUNNING_SPEED) {
+        float filtered_rpm = 0.0f;  // FROM EMA FILTER
+        
+        while (1) {
+            // latest targets and actuals
+            uint8_t target_state = motor_get_target_state(); 
+            int32_t target_rpm   = motor_get_target_speed();
+            int32_t actual_rpm   = motor_get_speed();
+
+            // TIMEOUT LOGIC (WATCHDOG) TO SEE IF THE MOTOR IS ACTIVELY RUNNING/ROTATING
+            uint32_t curr_cycle = k_cycle_get_32();
+            uint32_t past_cycle = bldc_get_last_cycle_count();
             
-            // Compute PID
-            float output = pid_compute(&rpm_pid, (float)target_rpm, (float)actual_rpm, 0.1f);
-            
-            // --- Feed-Forward Logic ---
-            // Base speed is the target. The PID output just nudges it up or down!
-            int rpm_pid_val = target_rpm + (int)output;
-            
-            // Safety clamps so we don't send impossible numbers to the hardware
-            if (rpm_pid_val < 0) rpm_pid_val = 0;
-            if (rpm_pid_val > 5000) rpm_pid_val = 5000;
+            // CHECK IF TIMEOUT
+            if((curr_cycle - past_cycle) > timeout_cycles){
+                actual_rpm = 0;
+                motor_set_speed(0);
+            }
+            filtered_rpm = filter_rpm((float)actual_rpm, filtered_rpm, 0.3f);
 
-            int pulse = bldc_rpm_to_pulse(rpm_pid_val);
-            
-            // Apply to hardware
-            bldc_set_pwm(pulse);
+            // Check if Bluetooth (or internal logic) wants the motor running
+            if (target_state == MOTOR_STATE_RUNNING_SPEED && !rpm_pid.is_stalled) {
+                
+                // Compute PID (dt = 10ms = 0.01s)
+                float duty_cycle_percent = pid_compute(&rpm_pid, (float)target_rpm, filtered_rpm, 0.01f);
+                
+                int pulse = bldc_percent_to_pulse(duty_cycle_percent);
+                
+                // Apply to hardware
+                bldc_set_pwm(pulse);
 
-        } else {
-            // State is MOTOR_STATE_STOPPED or ESTOP
-            bldc_set_pwm(0); 
-            
-            // Optional: reset PID integrals so it doesn't wind up while stopped
-            rpm_pid.integral = 0; 
+            } else {
+                // State is MOTOR_STATE_STOPPED or ESTOP
+                bldc_set_pwm(0); 
+                
+                // reset PID integrals so it doesn't wind up while stopped
+                rpm_pid.integral = 0; 
+                filtered_rpm = 0;
+            }
+
+            k_msleep(PID_PERIOD_MS); // Run at (1/PID_PERIOD_MS)*1000
         }
-
-        k_msleep(100); // Run at 10Hz
     }
-}
 
-/* ========================================================================= *
- * INITIALIZATION                                                            *
- * ========================================================================= */
-int motor_control_init(void) {
-    LOG_INF("Initializing Motor Control Threads...");
+    /* ========================================================================= *
+    * INITIALIZATION                                                            *
+    * ========================================================================= */
+    int motor_control_init(void) {
+        LOG_INF("Initializing Motor Control Threads...");
 
-    k_thread_create(&pid_thread_data, pid_stack, K_THREAD_STACK_SIZEOF(pid_stack),
-                    pid_control_thread, NULL, NULL, NULL,
-                    PRIO_PID, 0, K_NO_WAIT);
+        k_thread_create(&pid_thread_data, pid_stack, K_THREAD_STACK_SIZEOF(pid_stack),
+                        pid_control_thread, NULL, NULL, NULL,
+                        PRIO_PID, 0, K_NO_WAIT);
 
-    return 0;
-}
+        return 0;
+    }

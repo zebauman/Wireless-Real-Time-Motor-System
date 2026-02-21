@@ -22,6 +22,8 @@
 // UPPER NIBBLE: DIAGNOSTIC FLAGS (BITS 4-7) - CHECK IF THERE ARE ANY WARNINGS/ISSUES REGARDING THE MOTOR
 #define MOTOR_FLAG_SYNC_BAD			0x10	// 0001 0000 
 #define MOTOR_FLAG_OVERHEAT			0x20	// 0010 0000
+/** @todo ADD FLAG FOR MOTOR STALL -> ACTUAL RPM = 0, TARGET != 0; motor cannot move*/
+
 
 #define MOTOR_FLAG_MASK				0xF0	// 1111 0000 - ISOLATE FLAGS
 
@@ -43,6 +45,9 @@ struct motor_stats{
 
 	// CURRENT POSITION OF MOTOR (Degrees)
 	int32_t current_position;
+
+	// FILTERED SPEED OF MOTOR (RPM) 
+	int32_t filtered_speed;
 };
 
 
@@ -54,6 +59,9 @@ void motor_init(void);
 /** @brief SET THE MOTOR'S RPM (THIS IS THE ACTUAL & TRUE VALUE OF THE MOTOR) */
 void motor_set_speed(int32_t rpm);
 
+void motor_set_filtered_speed(int32_t rpm);
+
+
 /** @brief SET THE MOTOR'S POSITION (THIS IS THE ACTUAL VALUE OF THE MOTOR) */
 void motor_set_position(int32_t degrees);
 
@@ -64,11 +72,12 @@ void motor_set_overheat_warning(bool active);
 void motor_trigger_estop();
 
 // TARGETED SETTERS
-/** @brief SET THE DESIRED MOTOR RPM (STILL NEED TO SET THE TARGET STATE)) */
+/** @brief SET THE DESIRED MOTOR RPM (STILL NEED TO SET THE TARGET STATE) */
 void motor_set_target_speed(int32_t rpm);
 
 /** @brief SET THE DESIRED MOTOR POSITION (STILL NEED TO SET THE TARGET STATE) */
 void motor_set_target_position(int32_t degrees);
+
 
 
 
@@ -81,6 +90,7 @@ bool motor_is_sync_bad(void);
 bool motor_is_overheated(void);
 // TELEMETRY
 int32_t motor_get_speed(void);
+int32_t motor_get_filtered_speed(void);
 int32_t motor_get_position(void);
 
 // TARGETED MOTOR STAT GETTERS

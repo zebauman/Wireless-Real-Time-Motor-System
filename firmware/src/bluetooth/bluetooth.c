@@ -138,7 +138,7 @@ static ssize_t write_heartbeat(struct bt_conn *conn,
 	
 	uint8_t diff = new_val - old_val;
 
-	LOG_INF("Heartbeat received: %d, diff = %d", new_val, diff);
+	// LOG_INF("Heartbeat received: %d, diff = %d", new_val, diff);
 
 
 	// CASE 1: PACKET IS STALE (SAME PACKETS) => DO NOTHING, DON'T KICK THE DOG
@@ -198,9 +198,10 @@ BT_GATT_SERVICE_DEFINE(motor_svc, BT_GATT_PRIMARY_SERVICE(&motor_srv_uuid),
 
 // MERGED_BYTE (1 BYTE) = 
 // [MERGED_BYTE (1 BYTE)] [SPEED (4 BYTES)] [POSITION (4 BYTES)] = 9 BYTES TOTAL
+/** @todo SEND FILTERED AND ACTUAL SPEED AND CAN REDUCE NUMBER OF BYTES SENT */
 static inline void pack_telemetry(uint8_t out[9]){
 	out[0] = motor_get_full_status();
-	sys_put_le32(motor_get_speed(), &out[1]);
+	sys_put_le32(motor_get_filtered_speed(), &out[1]);
 	sys_put_le32(motor_get_position(), &out[5]);
 }
 
