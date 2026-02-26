@@ -1,96 +1,162 @@
 #include "bldc_driver.h"
-#include "motor.h" // <-- Access to the Motor Database
+#include "motor.h"
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <stdlib.h> 
-#include <stdint.h> // <-- ADDED: Ensures uint8_t and int32_t are defined
+#include <stdlib.h>
+#include <stdint.h>
 
 LOG_MODULE_REGISTER(mock_bldc, LOG_LEVEL_INF);
 
-// --- INTERNAL MOCK STATE ---
-static int simulated_pwm = 0;
-static int simulated_rpm = 0;
+/* ========================================================================= *
+ * MOCK BLDC DRIVER                                                          *
+ * Simulates hardware responses so the PID loop can close in software        *
+ * without any physical motor or gate driver attached.                       *
+ *                                                                           *
+ * Physics model:                                                            *
+ *   The WB55 TIM1 ARR = 3200 (64MHz / 3200 = 20kHz PWM).                  *
+ *   Min meaningful pulse: ~6% of 3200 = 192 (below this = no torque)       *
+ *   Max pulse: 96% of 3200 = 3072                                          *
+ *   Linear RPM model: RPM = (pulse - PULSE_ZERO) * RPM_PER_TICK            *
+ *   Tune PULSE_ZERO and RPM_PER_TICK to match your real motor's kV.        *
+ * ========================================================================= */
 
-int bldc_driver_init(void) {
-    LOG_INF("=================================================");
-    LOG_INF("   BLDC DRIVER MOCK INITIALIZED (SAFE MODE)      ");
-    LOG_INF(" No actual hardware PWM or ADC will be triggered.");
-    LOG_INF("=================================================");
-    return 0; 
+/* --- Hardware model constants (calibrate to your motor) --- */
+#define TIM1_ARR        3200        // Must match bldc_driver.c
+#define PULSE_ZERO      192         // Pulse at which motor just starts moving
+                                    // (≈ min_pwm_duty% of ARR)
+#define RPM_PER_TICK    2.0f        // RPM per timer tick above PULSE_ZERO
+                                    // Tune: at max pulse (3072-192=2880 ticks)
+                                    // 2880 * 2.0 = 5760 RPM ≈ your MOTOR_MAX_SPEED
+
+/* Hall sensor CW sequence for an 8-pole-pair motor (states 1-6) */
+static const uint8_t HALL_SEQ_CW[6] = {1, 5, 4, 6, 2, 3};
+
+/* ========================================================================= *
+ * INTERNAL STATE                                                            *
+ * ========================================================================= */
+static int     sim_pulse      = 0;
+static int32_t sim_rpm        = 0;
+static int     hall_idx       = 0;
+static uint32_t hall_last_ms  = 0;
+
+/* ========================================================================= *
+ * INIT                                                                      *
+ * ========================================================================= */
+int bldc_driver_init(void)
+{
+    LOG_INF("================================================");
+    LOG_INF("  MOCK BLDC DRIVER — NO HARDWARE WILL ACTUATE  ");
+    LOG_INF("  TIM1_ARR=%d  PULSE_ZERO=%d  RPM/TICK=%.1f   ",
+            TIM1_ARR, PULSE_ZERO, (double)RPM_PER_TICK);
+    LOG_INF("================================================");
+    return 0;
 }
 
-void bldc_set_pwm(int pulse) {
-    static int last_printed_pulse = -1;
-    simulated_pwm = pulse;
-    
-    // 1. Calculate the simulated physics
-    if (pulse <= 0) {
-        simulated_rpm = 0;
+/* ========================================================================= *
+ * PWM — core mock physics                                                   *
+ * ========================================================================= */
+void bldc_set_pwm(int pulse)
+{
+    sim_pulse = pulse;
+
+    /* Linear RPM model above the zero-crossing threshold */
+    if (pulse <= PULSE_ZERO) {
+        sim_rpm = 0;
     } else {
-        simulated_rpm = (int)((pulse - 3160) / 8.836);
+        sim_rpm = (int32_t)((pulse - PULSE_ZERO) * RPM_PER_TICK);
     }
 
-    // --- THE MOCK CHEAT ---
-    // Feed the simulated speed back into the vault so the PID loop can close!
-    motor_set_speed(simulated_rpm);
+    /* Feed simulated RPM back into the motor vault so PID loop can close */
+    motor_set_speed(sim_rpm);
 
-    // 2. Print the output
-    if (abs(pulse - last_printed_pulse) > 50) {
-        uint8_t db_status = motor_get_full_status();
-        int32_t db_target = motor_get_target_speed();
-        int32_t db_actual = motor_get_speed();
-
-        LOG_INF("[MOCK PWM] Pulse: %d -> Sim Motor RPM: %d", pulse, simulated_rpm);
-        LOG_INF("   ↳ [DB STATE] Status: 0x%02X | Target: %d RPM | Actual: %d RPM", 
-                db_status, db_target, db_actual);
-                
-        last_printed_pulse = pulse;
+    /* Log only on meaningful changes to avoid flooding at 100Hz */
+    static int last_logged_pulse = -999;
+    if (abs(pulse - last_logged_pulse) > 50) {
+        last_logged_pulse = pulse;
+        LOG_INF("[MOCK PWM] pulse=%d -> sim_rpm=%d | target=%d RPM | status=0x%02X",
+                pulse, sim_rpm,
+                motor_get_target_speed(),
+                motor_get_full_status());
     }
 }
 
-void bldc_set_commutation(uint8_t step, int ccw) {
-    if(step == 0) return;
+/* ========================================================================= *
+ * COMMUTATION — signature matches fixed bldc_driver.h (no ccw param)       *
+ * ========================================================================= */
+void bldc_set_commutation(uint8_t step)
+{
+    /* 0 = all phases off, 7 = invalid — both are silently ignored in mock */
+    if (step == 0 || step == 7) {
+        return;
+    }
 
     static uint8_t last_step = 0xFF;
     if (step != last_step) {
-        // I changed this to DEBUG level so it doesn't flood your console, 
-        // but you can change it back to LOG_INF if you want to watch the steps!
-        LOG_DBG("[MOCK COMM] Activating Phase Step: %d | Dir: %s", 
-                 step, ccw ? "CCW" : "CW");
         last_step = step;
+        LOG_DBG("[MOCK COMM] step=%d (%s)",
+                step, (step > 8) ? "CCW" : "CW");
     }
 }
 
-int bldc_read_hall_state(void) {
-    static const int hall_seq[6] = {1, 5, 4, 6, 2, 3};
-    static int current_idx = 0;
-    static uint32_t last_time = 0;
-
-    uint32_t now = k_uptime_get_32();
-    
-    // If the simulated RPM is practically zero, don't advance the sensors
-    if (abs(simulated_rpm) < 10) {
-        return hall_seq[current_idx];
+/* ========================================================================= *
+ * HALL STATE — advances index based on simulated RPM timing                *
+ * ========================================================================= */
+int bldc_read_hall_state(void)
+{
+    /* Below this threshold treat the motor as stationary */
+    if (abs(sim_rpm) < 10) {
+        return HALL_SEQ_CW[hall_idx];
     }
 
-    int abs_rpm = abs(simulated_rpm);
-    if (abs_rpm == 0) abs_rpm = 1; 
-    
-    // Calculate ms per hall step based on fake RPM
-    uint32_t ms_per_step = 1000 / ((abs_rpm * 6) / 60 + 1); 
-    
-    if ((now - last_time) >= ms_per_step) {
-        last_time = now;
-        if (simulated_rpm > 0) {
-            current_idx = (current_idx + 1) % 6; // Forward
+    uint32_t now = k_uptime_get_32();
+
+    /* Time per hall step (ms):
+     *   steps_per_sec = (|RPM| / 60) * POLE_PAIRS * 6
+     *   ms_per_step   = 1000 / steps_per_sec
+     * Add 1 to avoid division by zero at very low RPM. */
+    uint32_t steps_per_sec = ((uint32_t)abs(sim_rpm) * 8U * 6U) / 60U + 1U;
+    uint32_t ms_per_step   = 1000U / steps_per_sec;
+
+    if ((now - hall_last_ms) >= ms_per_step) {
+        hall_last_ms = now;
+        if (sim_rpm > 0) {
+            hall_idx = (hall_idx + 1) % 6;   /* CW */
         } else {
-            current_idx = (current_idx + 5) % 6; // Reverse
+            hall_idx = (hall_idx + 5) % 6;   /* CCW (reverse walk) */
         }
     }
 
-    return hall_seq[current_idx];
+    return HALL_SEQ_CW[hall_idx];
 }
 
-int bldc_rpm_to_pulse(int rpm) {
-    return (int)((rpm * 8.836) + 3160);
+/* ========================================================================= *
+ * PERCENT → PULSE conversion (matches real driver, ARR=3200)               *
+ * ========================================================================= */
+int bldc_percent_to_pulse(float percent_duty_cycle)
+{
+    int pulse = (int)(percent_duty_cycle * 32.0f);  // 3200 / 100 = 32
+    if (pulse > TIM1_ARR) pulse = TIM1_ARR;
+    if (pulse < 0)        pulse = 0;
+    return pulse;
+}
+
+/* ========================================================================= *
+ * GETTERS / SETTERS                                                         *
+ * ========================================================================= */
+
+/* Returns a plausible cycle count so the PID watchdog doesn't immediately
+ * time out. As long as sim_rpm != 0 the motor is "moving". */
+uint32_t bldc_get_last_cycle_count(void)
+{
+    if (sim_rpm != 0) {
+        /* Pretend a hall edge just fired to keep the watchdog happy */
+        return k_cycle_get_32();
+    }
+    /* Return a stale value so the PID timeout fires correctly when stopped */
+    return 0;
+}
+
+void bldc_set_direction(int ccw)
+{
+    LOG_DBG("[MOCK DIR] direction set to %s", ccw ? "CCW" : "CW");
 }

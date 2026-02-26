@@ -1,243 +1,244 @@
 #include "bldc_driver.h"
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/atomic.h>
 #include <soc.h>
 #include <stm32_ll_tim.h>
 #include <stm32_ll_bus.h>
 #include "motor.h"
 #include <zephyr/logging/log.h>
 
-
 LOG_MODULE_REGISTER(bldc_driver, LOG_LEVEL_INF);
 
-/* --- HARDWARE CONSTANTS --- */
-// 30MHz System Clock. 30,000,000 / 1500 = 20kHz PWM frequency.
-// You may need to adjust this depending on your specific STM32 chip's clock tree!
-#define TIM1_ARR 1500 
-#define DEADTIME_TICKS 50 // Hardware safety delay to prevent shoot-through
-#define POLE_PAIRS 8
+/* ========================================================================= *
+ * HARDWARE CONSTANTS                                                        *
+ * ========================================================================= */
 
+// STM32WB55 @ 64MHz (HSE 32MHz → PLL ×2), APB2 prescaler = 1
+// TIM1 clock = PCLK2 = 64 MHz  (×2 multiplier only activates when APB prescaler > 1)
+// ARR = 3200 → PWM freq = 64,000,000 / 3200 = 20 kHz
+#define TIM1_ARR        3200
 
-/* --- GPIO DEFINITIONS (From DeviceTree Aliases) --- */
+// Dead-time: 50 ticks × (1 / 64MHz) = 781 ns
+// Sufficient for most bootstrap gate drivers. Increase if your driver's
+// input capacitance or propagation delay needs a longer hold-off.
+#define DEADTIME_TICKS  50      // 781ns at 64MHz
+
+#define POLE_PAIRS      8
+// Steps per mechanical revolution = POLE_PAIRS * 6 hall states = 48
+// RPM = (cycles_per_sec / dt_cycles) * (60 / 48)
+//     = (cycles_per_sec * 5) / (dt_cycles * 4)
+// Max RPM before 50us debounce drops valid edges:
+//   60 / (50e-6 * POLE_PAIRS * 6) = ~25,000 RPM
+#define HALL_DEBOUNCE_US  50
+
+/* ========================================================================= *
+ * GPIO DEFINITIONS (From DeviceTree Aliases)                                *
+ * ========================================================================= */
 static const struct gpio_dt_spec hall_u = GPIO_DT_SPEC_GET(DT_ALIAS(hall_u), gpios);
 static const struct gpio_dt_spec hall_v = GPIO_DT_SPEC_GET(DT_ALIAS(hall_v), gpios);
 static const struct gpio_dt_spec hall_w = GPIO_DT_SPEC_GET(DT_ALIAS(hall_w), gpios);
 
-/* --- INTERRUPT STATE --- */
+/* ========================================================================= *
+ * INTERRUPT STATE                                                           *
+ * ========================================================================= */
 static struct gpio_callback hall_u_cb;
 static struct gpio_callback hall_v_cb;
 static struct gpio_callback hall_w_cb;
 
-static volatile uint32_t last_cycle_count = 0;
+// Atomic: written in ISR, read in PID thread — must not tear on 32-bit boundary
+static atomic_t last_cycle_atomic = ATOMIC_INIT(0);
+
 static volatile int current_direction_ccw = 0;
 
-void hall_isr_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
+/* Forward declaration */
+static void hall_isr_callback(const struct device *dev,
+                               struct gpio_callback *cb, uint32_t pins);
 
 /* ========================================================================= *
  * INITIALIZATION                                                            *
  * ========================================================================= */
 int bldc_driver_init(void) {
-    LOG_INF("Initializing Hardware Driver (Bare-Metal Timer + GPIO)...");
+    LOG_INF("Initializing BLDC Hardware Driver...");
 
-    // Initialize Fast Digital Hall Sensor GPIOs
-    if (!gpio_is_ready_dt(&hall_u) || !gpio_is_ready_dt(&hall_v) || !gpio_is_ready_dt(&hall_w)) {
+    /* --- Hall Sensor GPIOs --- */
+    if (!gpio_is_ready_dt(&hall_u) ||
+        !gpio_is_ready_dt(&hall_v) ||
+        !gpio_is_ready_dt(&hall_w)) {
         LOG_ERR("Hall sensor GPIOs not ready!");
-        return -1;
+        return -ENODEV;
     }
-    gpio_pin_configure_dt(&hall_u, GPIO_INPUT);
-    gpio_pin_configure_dt(&hall_v, GPIO_INPUT);
-    gpio_pin_configure_dt(&hall_w, GPIO_INPUT);
 
-    // Enable the clock for the Advanced Motor Control Timer (TIM1)
+    // GPIO_PULL_UP: hall sensors idle high; adjust to GPIO_PULL_DOWN if your
+    // hardware uses active-high open-drain sensors with external pull-downs.
+    gpio_pin_configure_dt(&hall_u, GPIO_INPUT | GPIO_PULL_UP);
+    gpio_pin_configure_dt(&hall_v, GPIO_INPUT | GPIO_PULL_UP);
+    gpio_pin_configure_dt(&hall_w, GPIO_INPUT | GPIO_PULL_UP);
+
+    /* --- TIM1: Advanced Motor Control Timer --- */
     LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_TIM1);
 
-    // Configure Timer for 20kHz
-    LL_TIM_SetPrescaler(TIM1, 0); 
-    LL_TIM_SetAutoReload(TIM1, TIM1_ARR); 
+    LL_TIM_SetPrescaler(TIM1, 0);
+    LL_TIM_SetAutoReload(TIM1, TIM1_ARR);
+    LL_TIM_EnableARRPreload(TIM1);  // Preload ARR so updates are glitch-free
 
-    // Configure all 3 channels for PWM Mode 1
+    // PWM Mode 1 on all three channels
     LL_TIM_OC_SetMode(TIM1, LL_TIM_CHANNEL_CH1, LL_TIM_OCMODE_PWM1);
     LL_TIM_OC_SetMode(TIM1, LL_TIM_CHANNEL_CH2, LL_TIM_OCMODE_PWM1);
     LL_TIM_OC_SetMode(TIM1, LL_TIM_CHANNEL_CH3, LL_TIM_OCMODE_PWM1);
 
-    // Enable preload so PWM updates don't glitch mid-cycle
+    // Preload CCR so writes take effect at the next update event, not mid-cycle
     LL_TIM_OC_EnablePreload(TIM1, LL_TIM_CHANNEL_CH1);
     LL_TIM_OC_EnablePreload(TIM1, LL_TIM_CHANNEL_CH2);
     LL_TIM_OC_EnablePreload(TIM1, LL_TIM_CHANNEL_CH3);
 
-    //  Insert Hardware Dead-Time
+    // Dead-time prevents high and low side from conducting simultaneously
     LL_TIM_OC_SetDeadTime(TIM1, DEADTIME_TICKS);
 
-    // Enable Main Output (MOE) and Start the Counter
+    // Start counter and enable main output (MOE)
     LL_TIM_EnableAllOutputs(TIM1);
     LL_TIM_EnableCounter(TIM1);
 
-    // Configure pins to trigger an interrupt whenever they go HIGH or LOW
+    // Force an update event to latch all shadow registers immediately
+    LL_TIM_GenerateEvent_UPDATE(TIM1);
+
+    // Seed last_cycle_atomic so the PID thread timeout doesn't fire before
+    // the motor has had a chance to move (avoids false timeout at startup)
+    atomic_set(&last_cycle_atomic, (atomic_val_t)k_cycle_get_32());
+
+    /* --- Hall Sensor Interrupts --- */
     gpio_pin_interrupt_configure_dt(&hall_u, GPIO_INT_EDGE_BOTH);
     gpio_pin_interrupt_configure_dt(&hall_v, GPIO_INT_EDGE_BOTH);
     gpio_pin_interrupt_configure_dt(&hall_w, GPIO_INT_EDGE_BOTH);
 
-    // Initialize Zephyr callback structures
     gpio_init_callback(&hall_u_cb, hall_isr_callback, BIT(hall_u.pin));
     gpio_init_callback(&hall_v_cb, hall_isr_callback, BIT(hall_v.pin));
     gpio_init_callback(&hall_w_cb, hall_isr_callback, BIT(hall_w.pin));
 
-    // Bind callbacks to the actual hardware ports
     gpio_add_callback_dt(&hall_u, &hall_u_cb);
     gpio_add_callback_dt(&hall_v, &hall_v_cb);
     gpio_add_callback_dt(&hall_w, &hall_w_cb);
 
+    LOG_INF("BLDC driver ready. PWM freq: %u Hz",
+            sys_clock_hw_cycles_per_sec() / TIM1_ARR);
+
     return 0;
 }
 
-void hall_isr_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
-    uint32_t now = k_cycle_get_32();
-    uint32_t dt_cycles = now - last_cycle_count;
-    
-    // Catch the first boot cycle
-    if (last_cycle_count == 0) {
-        last_cycle_count = now;
-        return;
-    }
-    last_cycle_count = now;
+/* ========================================================================= *
+ * HALL SENSOR ISR                                                           *
+ * ========================================================================= */
+static void hall_isr_callback(const struct device *dev,
+                               struct gpio_callback *cb, uint32_t pins) {
+    uint32_t now        = k_cycle_get_32();
+    uint32_t past       = (uint32_t)atomic_get(&last_cycle_atomic);
+    uint32_t dt_cycles  = now - past;   // Safe: unsigned wraps correctly
 
     uint32_t cycles_per_sec = sys_clock_hw_cycles_per_sec();
-    
-    // Hardware Debounce (Ignore glitches faster than ~50 microseconds)
-    uint32_t dt_us = (uint32_t)(((uint64_t)dt_cycles * 1000000) / cycles_per_sec);
-    if (dt_us < 50) return; 
 
-    uint8_t current_step = bldc_read_hall_state();
-    bldc_set_commutation(current_step, current_direction_ccw);
-
-    // 1 mech rev = 48 steps (8 pole pairs * 6 states). 60 / 48 = 5/4.
-    int32_t mech_rpm = (int32_t)((cycles_per_sec * 5) / (dt_cycles * 4));
-    
-    if(current_direction_ccw){
-        mech_rpm = -mech_rpm;
+    // Hardware debounce: ignore edges faster than HALL_DEBOUNCE_US
+    // This filters PCB noise without masking valid transitions up to ~25k RPM
+    uint32_t dt_us = (uint32_t)(((uint64_t)dt_cycles * 1000000U) / cycles_per_sec);
+    if (dt_us < HALL_DEBOUNCE_US) {
+        return;
     }
 
-    motor_set_speed(mech_rpm);
+    atomic_set(&last_cycle_atomic, (atomic_val_t)now);
+
+    // Read and validate hall state — 0 (000) and 7 (111) are illegal
+    uint8_t raw_step = (uint8_t)bldc_read_hall_state();
+    if (raw_step == 0 || raw_step == 7) {
+        LOG_WRN("Invalid hall state: %d — possible sensor fault or wiring issue", raw_step);
+        return;
+    }
+
+    // Apply direction offset: CCW commutation table lives at cases 9–14 (+8)
+    uint8_t step = current_direction_ccw ? (raw_step + 8) : raw_step;
+    bldc_set_commutation(step);
+
+    // RPM = (cycles_per_sec / dt_cycles) * (60 / steps_per_rev)
+    // steps_per_rev = POLE_PAIRS * 6 = 48  =>  60/48 = 5/4
+    // Use 64-bit to prevent overflow on faster clocks (e.g. 72MHz * 5 = 360M > 2^32)
+    int32_t mech_rpm = (int32_t)(((uint64_t)cycles_per_sec * 5ULL)
+                                 / ((uint64_t)dt_cycles   * 4ULL));
+
+    motor_set_speed(current_direction_ccw ? -mech_rpm : mech_rpm);
 }
 
 /* ========================================================================= *
  * SENSOR READS                                                              *
  * ========================================================================= */
 int bldc_read_hall_state(void) {
-    // Read the digital pins (takes mere nanoseconds instead of milliseconds)
-    // USING GPIOS to read the hall effect sensors instead of ADC for nanosecond delay instead of milisecond delay
-    int u = gpio_pin_get_dt(&hall_u);   // HALL EFFECT VALUE IS ONE IF PASSED ELSE ZERO
+    int u = gpio_pin_get_dt(&hall_u);
     int v = gpio_pin_get_dt(&hall_v);
     int w = gpio_pin_get_dt(&hall_w);
-    
-    // Combine into a 3-bit state (1 to 6)
-    return (u << 2) | (v << 1) | w; // RETURN 3-bit OUTPUT STATE WHERE [3'b2 = u, 3'b1 = v, 3'b0 = w]
+    // Pack into 3-bit value: [U=bit2, V=bit1, W=bit0]
+    return (u << 2) | (v << 1) | w;
 }
 
 /* ========================================================================= *
  * MOTOR ACTUATION                                                           *
  * ========================================================================= */
 void bldc_set_pwm(int pulse) {
-    // Clamp the pulse width so we don't exceed the Auto-Reload Register
     if (pulse > TIM1_ARR) pulse = TIM1_ARR;
-    if (pulse < 0) pulse = 0;
+    if (pulse < 0)        pulse = 0;
 
-    // Write directly to the bare-metal Capture/Compare Registers
-    TIM1->CCR1 = pulse;
-    TIM1->CCR2 = pulse;
-    TIM1->CCR3 = pulse;
+    // Direct CCR writes; values are double-buffered via preload — glitch-free
+    TIM1->CCR1 = (uint32_t)pulse;
+    TIM1->CCR2 = (uint32_t)pulse;
+    TIM1->CCR3 = (uint32_t)pulse;
 }
 
-void bldc_set_commutation(uint8_t step, int ccw) {
-    // Clear all outputs (Disable all high and low side switches)
-    TIM1->CCER &= ~(TIM_CCER_CC1E | TIM_CCER_CC1NE |
-                    TIM_CCER_CC2E | TIM_CCER_CC2NE |
-                    TIM_CCER_CC3E | TIM_CCER_CC3NE);
+void bldc_set_commutation(uint8_t step) {
+    // Disable all high-side (CCxE) and low-side (CCxNE) outputs first
+    TIM1->CCER &= ~(TIM_CCER_CC1E  | TIM_CCER_CC1NE |
+                    TIM_CCER_CC2E  | TIM_CCER_CC2NE |
+                    TIM_CCER_CC3E  | TIM_CCER_CC3NE);
 
-    if(step == 0) {
-        printf("Commutation Step 0: All phases OFF\n");
-        return;
-    }
-
-    const char* phase_log = "Unknown State";
-
-    // Apply the correct phases. The hardware dead-time automatically ensures
-    // that the High side and Low side don't cross over and short circuit!
+    // Enable the correct phase pair for this hall step.
+    // Hardware dead-time (DEADTIME_TICKS) prevents shoot-through automatically.
     switch (step) {
-        // --- CLOCKWISE (States 1-6) ---
-        case 1: // W+ V-
-            TIM1->CCER |= TIM_CCER_CC3E | TIM_CCER_CC2NE;
-            phase_log = "W: HIGH, V: LOW,  U: OFF";
-            break;
-        case 5: // U+ V-
-            TIM1->CCER |= TIM_CCER_CC1E | TIM_CCER_CC2NE;
-            phase_log = "U: HIGH, V: LOW,  W: OFF";
-            break;
-        case 4: // U+ W-
-            TIM1->CCER |= TIM_CCER_CC1E | TIM_CCER_CC3NE;
-            phase_log = "U: HIGH, W: LOW,  V: OFF";
-            break;
-        case 6: // V+ W-
-            TIM1->CCER |= TIM_CCER_CC2E | TIM_CCER_CC3NE;
-            phase_log = "V: HIGH, W: LOW,  U: OFF";
-            break;
-        case 2: // V+ U-
-            TIM1->CCER |= TIM_CCER_CC2E | TIM_CCER_CC1NE;
-            phase_log = "V: HIGH, U: LOW,  W: OFF";
-            break;
-        case 3: // W+ U-
-            TIM1->CCER |= TIM_CCER_CC3E | TIM_CCER_CC1NE;
-            phase_log = "W: HIGH, U: LOW,  V: OFF";
-            break;
+        /* --- CLOCKWISE (raw hall state 1–6) --- */
+        case 1:  TIM1->CCER |= TIM_CCER_CC3E  | TIM_CCER_CC2NE; break; // W+ V-
+        case 5:  TIM1->CCER |= TIM_CCER_CC1E  | TIM_CCER_CC2NE; break; // U+ V-
+        case 4:  TIM1->CCER |= TIM_CCER_CC1E  | TIM_CCER_CC3NE; break; // U+ W-
+        case 6:  TIM1->CCER |= TIM_CCER_CC2E  | TIM_CCER_CC3NE; break; // V+ W-
+        case 2:  TIM1->CCER |= TIM_CCER_CC2E  | TIM_CCER_CC1NE; break; // V+ U-
+        case 3:  TIM1->CCER |= TIM_CCER_CC3E  | TIM_CCER_CC1NE; break; // W+ U-
 
-        // --- COUNTER-CLOCKWISE (States 9-14) (+8 offset) ---
-        case 9: // U+ V-
-            TIM1->CCER |= TIM_CCER_CC1E | TIM_CCER_CC2NE;
-            phase_log = "U: HIGH, V: LOW,  W: OFF";
-            break;
-        case 13: // W+ V-
-            TIM1->CCER |= TIM_CCER_CC3E | TIM_CCER_CC2NE;
-            phase_log = "W: HIGH, V: LOW,  U: OFF";
-            break;
-        case 12: // W+ U-
-            TIM1->CCER |= TIM_CCER_CC3E | TIM_CCER_CC1NE;
-            phase_log = "W: HIGH, U: LOW,  V: OFF";
-            break;
-        case 14: // V+ U-
-            TIM1->CCER |= TIM_CCER_CC2E | TIM_CCER_CC1NE;
-            phase_log = "V: HIGH, U: LOW,  W: OFF";
-            break;
-        case 10: // V+ W-
-            TIM1->CCER |= TIM_CCER_CC2E | TIM_CCER_CC3NE;
-            phase_log = "V: HIGH, W: LOW,  U: OFF";
-            break;
-        case 11: // U+ W-
-            TIM1->CCER |= TIM_CCER_CC1E | TIM_CCER_CC3NE;
-            phase_log = "U: HIGH, W: LOW,  V: OFF";
+        /* --- COUNTER-CLOCKWISE (raw + 8 offset, cases 9–14) --- */
+        case 9:  TIM1->CCER |= TIM_CCER_CC1E  | TIM_CCER_CC2NE; break; // U+ V-
+        case 13: TIM1->CCER |= TIM_CCER_CC3E  | TIM_CCER_CC2NE; break; // W+ V-
+        case 12: TIM1->CCER |= TIM_CCER_CC3E  | TIM_CCER_CC1NE; break; // W+ U-
+        case 14: TIM1->CCER |= TIM_CCER_CC2E  | TIM_CCER_CC1NE; break; // V+ U-
+        case 10: TIM1->CCER |= TIM_CCER_CC2E  | TIM_CCER_CC3NE; break; // V+ W-
+        case 11: TIM1->CCER |= TIM_CCER_CC1E  | TIM_CCER_CC3NE; break; // U+ W-
+
+        default:
+            // Should never reach here — caller must validate step before calling
+            LOG_ERR("bldc: invalid commutation step %d", step);
             break;
     }
-
-    // Output the log
-    // printf("Dir: %s | Step %2d | %s\n", (step > 8) ? "CCW" : "CW ", step, phase_log);
 }
 
 int bldc_percent_to_pulse(float percent_duty_cycle) {
-    // 100% duty cycle = TIM1_ARR (1500)
-    // We multiply the percentage by (1500 / 100.0) which is 15.0
-    int pulse = (int)(percent_duty_cycle * 15.0f);
-    
+    // TIM1_ARR = 3200 (64MHz / 3200 = 20kHz)
+    // Scale factor = TIM1_ARR / 100.0 = 32.0
+    int pulse = (int)(percent_duty_cycle * 32.0f);
+
     if (pulse > TIM1_ARR) pulse = TIM1_ARR;
-    if (pulse < 0) pulse = 0;
-    
+    if (pulse < 0)        pulse = 0;
+
     return pulse;
 }
 
-// GETTERS
-uint32_t bldc_get_last_cycle_count(void){
-    return last_cycle_count;
+/* ========================================================================= *
+ * GETTERS / SETTERS                                                         *
+ * ========================================================================= */
+uint32_t bldc_get_last_cycle_count(void) {
+    return (uint32_t)atomic_get(&last_cycle_atomic);
 }
 
-// SETTER
-void bldc_set_direction_setter(int ccw){
+void bldc_set_direction(int ccw) {
     current_direction_ccw = ccw;
 }

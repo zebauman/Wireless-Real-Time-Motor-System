@@ -1,71 +1,137 @@
+/*
+ * app.overlay — STM32WB55 BLDC Motor Controller
+ *
+ * CPU:   Cortex-M4 @ 64 MHz (via PLL from 32 MHz HSE)
+ * TIM1:  on APB2 — clock = 64 MHz (APB2 prescaler = 1, no x2 multiplier)
+ *        ARR = 3200 → PWM freq = 64,000,000 / 3200 = 20 kHz  ✓
+ *
+ * NOTE: The original code had TIM1_ARR=1500 assuming a 30MHz clock.
+ *       On the WB55 running at 64MHz with APB2 prescaler=1, ARR must be
+ *       3200 to maintain 20kHz. Update TIM1_ARR in bldc_driver.c to 3200
+ *       and the dead-time / RPM scale factor accordingly.
+ *
+ * RPM scale factor with ARR=3200:
+ *   bldc_percent_to_pulse: pulse = percent * (3200 / 100.0) = percent * 32.0f
+ *   Update bldc_percent_to_pulse() in bldc_driver.c to use 32.0f instead of 15.0f
+ *
+ * Dead-time at 64MHz: 50 ticks = 50/64MHz = ~781ns — acceptable for most
+ * gate drivers. Increase if your gate driver bootstrap needs more hold time.
+ */
+
 / {
     aliases {
-        /* Aliases for our new digital Hall sensor pins */
         hall-u = &hall_u_pin;
         hall-v = &hall_v_pin;
         hall-w = &hall_w_pin;
     };
 
-    /* Define the Hall sensors as standard GPIO inputs */
+    /*
+     * Hall sensors as gpio-keys.
+     * Pull resistors are configured at runtime in bldc_driver.c via
+     * GPIO_INPUT | GPIO_PULL_UP. Do NOT duplicate pull flags here.
+     */
     hall_sensors {
-        compatible = "gpio-keys"; 
-        
+        compatible = "gpio-keys";
+
         hall_u_pin: hall_u {
-            /* PC2 */
-            gpios = <&gpioc 2 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+            gpios = <&gpioc 2 GPIO_ACTIVE_HIGH>;  /* PC2 */
+            label = "HALL_U";
         };
         hall_v_pin: hall_v {
-            /* PA0 */
-            gpios = <&gpioa 0 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+            gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;  /* PA0 */
+            label = "HALL_V";
         };
         hall_w_pin: hall_w {
-            /* PA1 */
-            gpios = <&gpioa 1 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+            gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>;  /* PA1 */
+            label = "HALL_W";
         };
     };
 };
 
-/* --- BARE-METAL TIMER CONFIGURATION --- */
+/*
+ * Clock tree for STM32WB55 (must match prj.conf RCC settings):
+ *   HSE = 32 MHz → PLL (×2) → SYSCLK = 64 MHz
+ *   AHB  prescaler = 1 → HCLK  = 64 MHz
+ *   APB1 prescaler = 1 → PCLK1 = 64 MHz  (TIM2/LPTIM used for Zephyr tick)
+ *   APB2 prescaler = 1 → PCLK2 = 64 MHz  (TIM1 lives here)
+ *
+ * On STM32WB55 the APB timer multiplier (×2) only activates when the APB
+ * prescaler > 1. With prescaler = 1, TIM1 clock = PCLK2 = 64 MHz exactly.
+ */
+&rcc {
+    clocks = <&pll>;
+    clock-frequency = <DT_FREQ_M(64)>;
+    cpu1-prescaler  = <1>;
+    cpu2-prescaler  = <2>;   /* M0+ BLE coprocessor runs at 32 MHz */
+    ahb4-prescaler  = <1>;
+    apb1-prescaler  = <1>;
+    apb2-prescaler  = <1>;
+};
+
+&pll {
+    div-m  = <2>;   /* HSE 32MHz / 2 = 16 MHz VCO input        */
+    mul-n  = <8>;   /* 16 MHz × 8   = 128 MHz VCO output       */
+    div-q  = <2>;   /* 128 / 2      = 64 MHz (USB/RNG clock)   */
+    div-r  = <2>;   /* 128 / 2      = 64 MHz SYSCLK            */
+    clocks = <&clk_hse>;
+    status = "okay";
+};
+
+/*
+ * TIM1 — Advanced Motor Control Timer @ 64 MHz
+ *
+ * The pwm child node exists only to trigger Zephyr's pinctrl driver to
+ * configure AF muxing at boot. All register-level PWM control is done
+ * directly in bldc_driver.c via the STM32 LL API.
+ */
 &timers1 {
     status = "okay";
-    
+
     pwm1: pwm {
-        status = "okay"; /* Let Zephyr enable the pin multiplexing at boot */
-        
-        /* Pins MUST be declared in the child node */
-        pinctrl-0 = <&pwm1_ch1_pa8 &pwm1_ch2_pa9 &pwm1_ch3_pa10 
-                     &pwm1_ch1n_pb13 &pwm1_ch2n_pb14 &pwm1_ch3n_pb15>;
+        status = "okay";
+        pinctrl-0 = <&pwm1_ch1_pa8   &pwm1_ch2_pa9   &pwm1_ch3_pa10
+                     &pwm1_ch1n_pb13  &pwm1_ch2n_pb14  &pwm1_ch3n_pb15>;
         pinctrl-names = "default";
     };
 };
 
-/* --- PIN MULTIPLEXING --- */
+/*
+ * Pin multiplexing — TIM1 PWM outputs
+ *
+ * PA8/9/10  = high-side (CH1/2/3)
+ * PB13/14/15 = low-side complementary (CH1N/2N/3N)
+ *
+ * drive-push-pull is correct for actively driven AF output pins.
+ * Do NOT use bias-pull-down — it fights the active driver and
+ * degrades gate drive switching edges.
+ */
 &pinctrl {
-    /* High Side Switches */
+
+    /* High-side switches */
     pwm1_ch1_pa8: pwm1_ch1_pa8 {
-        pinmux = <STM32_PINMUX('A', 8, AF1)>;   /* TIM1_CH1 */
-        bias-pull-down;
+        pinmux = <STM32_PINMUX('A', 8,  AF1)>;  /* TIM1_CH1  — Phase U high */
+        drive-push-pull;
     };
     pwm1_ch2_pa9: pwm1_ch2_pa9 {
-        pinmux = <STM32_PINMUX('A', 9, AF1)>;   /* TIM1_CH2 */
-        bias-pull-down;
+        pinmux = <STM32_PINMUX('A', 9,  AF1)>;  /* TIM1_CH2  — Phase V high */
+        drive-push-pull;
     };
     pwm1_ch3_pa10: pwm1_ch3_pa10 {
-        pinmux = <STM32_PINMUX('A', 10, AF1)>;  /* TIM1_CH3 */
-        bias-pull-down;
+        pinmux = <STM32_PINMUX('A', 10, AF1)>;  /* TIM1_CH3  — Phase W high */
+        drive-push-pull;
     };
 
-    /* Low Side Switches (Complementary) */
+    /* Low-side switches (complementary) */
     pwm1_ch1n_pb13: pwm1_ch1n_pb13 {
-        pinmux = <STM32_PINMUX('B', 13, AF1)>;  /* TIM1_CH1N */
-        bias-pull-down;
+        pinmux = <STM32_PINMUX('B', 13, AF1)>;  /* TIM1_CH1N — Phase U low */
+        drive-push-pull;
     };
     pwm1_ch2n_pb14: pwm1_ch2n_pb14 {
-        pinmux = <STM32_PINMUX('B', 14, AF1)>;  /* TIM1_CH2N */
-        bias-pull-down;
+        pinmux = <STM32_PINMUX('B', 14, AF1)>;  /* TIM1_CH2N — Phase V low */
+        drive-push-pull;
     };
     pwm1_ch3n_pb15: pwm1_ch3n_pb15 {
-        pinmux = <STM32_PINMUX('B', 15, AF1)>;  /* TIM1_CH3N */
-        bias-pull-down;
+        pinmux = <STM32_PINMUX('B', 15, AF1)>;  /* TIM1_CH3N — Phase W low */
+        drive-push-pull;
     };
 };
