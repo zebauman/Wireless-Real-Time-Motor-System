@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <zephyr/sys/atomic.h>
+
+extern atomic_t g_motor_speed_atomic;
 
 /* ========================================================================= *
  * BLDC DRIVER — Public API                                                  *

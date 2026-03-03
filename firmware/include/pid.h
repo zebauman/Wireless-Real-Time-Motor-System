@@ -21,8 +21,8 @@ typedef struct {
 void pid_init(pid_struct *pid, float kp, float ki, float integral_limit,
      float out_min, float out_max);
 
-float pid_compute(pid_struct *pid, float target, float target, float measured, float dt);
+float pid_compute(pid_struct *pid, float target, float measured, float dt);
 
-float pid_reset(pid_t *pid);
+void pid_reset(pid_struct *pid);
 
 #endif /* PID_H */

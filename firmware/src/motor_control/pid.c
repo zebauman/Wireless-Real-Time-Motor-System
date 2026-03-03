@@ -34,14 +34,14 @@ float pid_compute(pid_struct *pid, float target, float measured, float dt) {
     if(output > pid->out_max) output = pid->out_max;
     else if(output < pid->out_min) output = pid->out_min;
 
-    LOG_DBG(">Target:%.0f", target);
-    LOG_DBG(">Measured:%.0f", measured);
-    LOG_DBG(">PWM_Output:%.2f", output * 10.0f); // Scaled x10 for graph readability
+    // LOG_DBG(">Target:%.0f", target);
+    // LOG_DBG(">Measured:%.0f", measured);
+    // LOG_DBG(">PWM_Output:%.2f", output * 10.0f); // Scaled x10 for graph readability
 
 
     return output;
 }
 
-void pid_reset(pid_t *pid){
+void pid_reset(pid_struct *pid){
     pid->integral = 0.0f;
 }

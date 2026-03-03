@@ -5,7 +5,6 @@
 #include <soc.h>
 #include <stm32_ll_tim.h>
 #include <stm32_ll_bus.h>
-#include "motor.h"
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(bldc_driver, LOG_LEVEL_INF);
@@ -46,7 +45,10 @@ static struct gpio_callback hall_u_cb;
 static struct gpio_callback hall_v_cb;
 static struct gpio_callback hall_w_cb;
 
-// Atomic: written in ISR, read in PID thread — must not tear on 32-bit boundary
+// ATOMIC ISR TO THREAD SPEED CHANNEL - cannot use mutex in isr for ZEPHYR so instead ISR writes raw RPM with atomic & motor_control.c externs so reads directly
+atomic_t g_motor_speed_atomic = ATOMIC_INIT(0);
+
+// written in ISR, read in PID thread — must not tear on 32-bit boundary
 static atomic_t last_cycle_atomic = ATOMIC_INIT(0);
 
 static volatile int current_direction_ccw = 0;
@@ -79,7 +81,7 @@ int bldc_driver_init(void) {
     LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_TIM1);
 
     LL_TIM_SetPrescaler(TIM1, 0);
-    LL_TIM_SetAutoReload(TIM1, TIM1_ARR);
+    LL_TIM_SetAutoReload(TIM1, TIM1_ARR - 1);
     LL_TIM_EnableARRPreload(TIM1);  // Preload ARR so updates are glitch-free
 
     // PWM Mode 1 on all three channels
@@ -92,8 +94,17 @@ int bldc_driver_init(void) {
     LL_TIM_OC_EnablePreload(TIM1, LL_TIM_CHANNEL_CH2);
     LL_TIM_OC_EnablePreload(TIM1, LL_TIM_CHANNEL_CH3);
 
+    // SET OSSI AND OSSR SO OUTPUTS ARE ACTIVELY DRIVEN LOW WHEN DISABLED ( WHEN CCER BITS ARE CLEARED or MOE=0), not Hi-Z
+    // WITHOUT THIS FLOAT GATE DRIVER INPUTS CAN CAUSE SHOOT-THROUGH when the motor is stopped or during an ESTOP
+    LL_TIM_SetOffStates(TIM1, LL_TIM_OSSI_ENABLE, LL_TIM_OSSR_ENABLE);
+
     // Dead-time prevents high and low side from conducting simultaneously
     LL_TIM_OC_SetDeadTime(TIM1, DEADTIME_TICKS);
+
+    // ZERO ALL OF THE CCRs before enabling OUTPUTS - NO PULSE until bldc_set_pwm()
+    TIM1->CCR1 = 0;
+    TIM1->CCR2 = 0;
+    TIM1->CCR3 = 0;
 
     // Start counter and enable main output (MOE)
     LL_TIM_EnableAllOutputs(TIM1);
@@ -102,6 +113,19 @@ int bldc_driver_init(void) {
     // Force an update event to latch all shadow registers immediately
     LL_TIM_GenerateEvent_UPDATE(TIM1);
 
+    // APPLY INITIAL COMMUTATION FROM CURRENT HALL STATE (w/ out this no phase will be energised until the first hall edge fires)
+    uint8_t init_step = (uint8_t)bldc_read_hall_state();
+    // HALL EFFECT SENSOR READINGS HAS BE READING ATLEAST TWO OF THE STATE
+    // SO IT CANNOT BE ZERO (when no hall edges are being triggered)
+    // or 7 (when all hall edges are being triggered) -> only two edges should be triggered
+    if (init_step != 0 && init_step != 7){
+        uint8_t step = current_direction_ccw ? (init_step + 8) : init_step;
+        bldc_set_commutation(step);
+        LOG_INF("Initial commutation: hall=0x%X step=%u", init_step, step);
+    } else {
+        LOG_WRN("Invalid hall state at boot (0x%X) — check sensor wiring", init_step);
+    }
+    
     // Seed last_cycle_atomic so the PID thread timeout doesn't fire before
     // the motor has had a chance to move (avoids false timeout at startup)
     atomic_set(&last_cycle_atomic, (atomic_val_t)k_cycle_get_32());
@@ -119,8 +143,9 @@ int bldc_driver_init(void) {
     gpio_add_callback_dt(&hall_v, &hall_v_cb);
     gpio_add_callback_dt(&hall_w, &hall_w_cb);
 
-    LOG_INF("BLDC driver ready. PWM freq: %u Hz",
-            sys_clock_hw_cycles_per_sec() / TIM1_ARR);
+    LOG_INF("BLDC driver ready — PWM %u Hz, dead-time %u ns",
+            CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC / TIM1_ARR,
+            (DEADTIME_TICKS * 1000U) / (CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC / 1000000U));
 
     return 0;
 }
@@ -148,7 +173,7 @@ static void hall_isr_callback(const struct device *dev,
     // Read and validate hall state — 0 (000) and 7 (111) are illegal
     uint8_t raw_step = (uint8_t)bldc_read_hall_state();
     if (raw_step == 0 || raw_step == 7) {
-        LOG_WRN("Invalid hall state: %d — possible sensor fault or wiring issue", raw_step);
+        // LOG_WRN("Invalid hall state: %d — possible sensor fault or wiring issue", raw_step);
         return;
     }
 
@@ -162,7 +187,7 @@ static void hall_isr_callback(const struct device *dev,
     int32_t mech_rpm = (int32_t)(((uint64_t)cycles_per_sec * 5ULL)
                                  / ((uint64_t)dt_cycles   * 4ULL));
 
-    motor_set_speed(current_direction_ccw ? -mech_rpm : mech_rpm);
+    atomic_set(&g_motor_speed_atomic, (atomic_val_t)(current_direction_ccw ? -mech_rpm : mech_rpm));
 }
 
 /* ========================================================================= *
@@ -221,6 +246,7 @@ void bldc_set_commutation(uint8_t step) {
     }
 }
 
+// DUTY CYCLE CONVERSION
 int bldc_percent_to_pulse(float percent_duty_cycle) {
     // TIM1_ARR = 3200 (64MHz / 3200 = 20kHz)
     // Scale factor = TIM1_ARR / 100.0 = 32.0

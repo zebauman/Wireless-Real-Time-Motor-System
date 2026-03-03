@@ -1,6 +1,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/syscalls/atomic.h>
+#include <zephyr/sys/atomic.h>
 
 #include "motor_control.h"
 #include "motor.h"
@@ -38,7 +38,7 @@ extern atomic_t g_motor_speed_atomic;
 // RESET HELPER WHENEVER THE MOTOR STOPS, FAULTS, OR ESTOPS SO NEXT RUN WILL START WITH A CLEAN STATE
 static void reset_control_state(void)
 {
-    pid_reset(&pid_pid);
+    pid_reset(&rpm_pid);
     filtered_rpm = 0.0f;    // clear stale EMA value so P term for the PID isn't ruined (large negative error spike if target is low)
     stall_ms     = 0;
 }
@@ -94,7 +94,7 @@ static void pid_control_thread(void *p1, void *p2, void *p3) {
         if(target_rpm != 0 && raw_rpm == 0){
             stall_ms += PID_PERIOD_MS;
             if(stall_ms >= STALL_TIMEOUT_MS){
-                LOG_ERR("STALL: TARGET=%d RPM, no movement for %u ms"
+                LOG_ERR("STALL: TARGET=%d RPM, no movement for %u ms",
                         target_rpm, STALL_TIMEOUT_MS);
                         motor_trigger_estop();
                         reset_control_state();
@@ -108,6 +108,7 @@ static void pid_control_thread(void *p1, void *p2, void *p3) {
         if(target_state == MOTOR_STATE_RUNNING_SPEED){
             float duty = pid_compute(&rpm_pid,
                                     (float)target_rpm,
+                                    filtered_rpm, 
                                     DT);
             bldc_set_pwm(bldc_percent_to_pulse(duty));
         } else {
