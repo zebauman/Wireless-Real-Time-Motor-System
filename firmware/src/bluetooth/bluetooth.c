@@ -28,9 +28,6 @@ LOG_MODULE_REGISTER(bluetooth, LOG_LEVEL_INF);
  * ========================================================================= */
 static struct motor_app_ctx motor_ctx;
 
-/* Skips the sync-slip check on the very first heartbeat after (re)connect,
- * preventing a false SYNC SLIP warning caused by the counter starting at an
- * arbitrary value on the phone side. */
 static bool first_heartbeat = true;
 
 static const struct bt_uuid_128 motor_srv_uuid      = BT_UUID_INIT_128(BT_UUID_MOTOR_SERVICE_VAL);
@@ -222,7 +219,7 @@ BT_GATT_SERVICE_DEFINE(motor_svc,
 static inline void pack_telemetry(uint8_t out[9])
 {
     out[0] = motor_get_full_status();
-    sys_put_le32((uint32_t)motor_get_filtered_speed(), &out[1]);
+    sys_put_le32((uint32_t)motor_get_speed(), &out[1]);
     sys_put_le32((uint32_t)motor_get_position(),       &out[5]);
 }
 
